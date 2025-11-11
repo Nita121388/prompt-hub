@@ -36,9 +36,40 @@
         "category": "Prompt Hub"
       },
       {
+        "command": "promptHub.aiGenerateMeta",
+        "title": "Prompt Hub: 生成标题/emoji",
+        "category": "Prompt Hub"
+      },
+      {
+        "command": "promptHub.aiOptimize",
+        "title": "Prompt Hub: 优化 Prompt 内容",
+        "category": "Prompt Hub"
+      },
+      {
+        "command": "promptHub.gitSync",
+        "title": "Prompt Hub: Git 同步",
+        "category": "Prompt Hub"
+      },
+      {
         "command": "promptHub.searchPrompt",
         "title": "Prompt Hub: 搜索 Prompt",
         "category": "Prompt Hub"
+      },
+      {
+        "command": "promptHub.copyPromptContent",
+        "title": "Prompt Hub: 复制内容",
+        "category": "Prompt Hub"
+      },
+      {
+        "command": "promptHub.deletePrompt",
+        "title": "Prompt Hub: 删除 Prompt",
+        "category": "Prompt Hub"
+      },
+      {
+        "command": "promptHub.refreshView",
+        "title": "Prompt Hub: 刷新视图",
+        "category": "Prompt Hub",
+        "icon": "$(refresh)"
       },
       {
         "command": "promptHub.openSettings",
@@ -54,12 +85,6 @@
         "command": "promptHub.resetOnboarding",
         "title": "Prompt Hub: 重置配置向导",
         "category": "Prompt Hub"
-      },
-      {
-        "command": "promptHub.refreshView",
-        "title": "Prompt Hub: 刷新视图",
-        "category": "Prompt Hub",
-        "icon": "$(refresh)"
       }
     ],
     "viewsContainers": {
@@ -102,6 +127,33 @@
           "command": "promptHub.newPromptFile",
           "when": "view == promptHubView",
           "group": "navigation"
+        },
+        {
+          "command": "promptHub.gitSync",
+          "when": "view == promptHubView",
+          "group": "navigation"
+        }
+      ],
+      "view/item/context": [
+        {
+          "command": "promptHub.copyPromptContent",
+          "when": "view == promptHubView && viewItem == prompt",
+          "group": "inline@1"
+        },
+        {
+          "command": "promptHub.aiGenerateMeta",
+          "when": "view == promptHubView && viewItem == prompt",
+          "group": "inline@2"
+        },
+        {
+          "command": "promptHub.aiOptimize",
+          "when": "view == promptHubView && viewItem == prompt",
+          "group": "inline@3"
+        },
+        {
+          "command": "promptHub.deletePrompt",
+          "when": "view == promptHubView && viewItem == prompt",
+          "group": "navigation@99"
         }
       ]
     },
@@ -147,7 +199,7 @@
         "promptHub.selection.removePromptMarker": {
           "type": "boolean",
           "default": true,
-          "description": "检测到标记后，是否从内容中移除标记行",
+          "description": "检测到标记后，是否从内容中移除标记",
           "order": 21
         },
         "promptHub.git.enableSync": {
@@ -171,12 +223,7 @@
         "promptHub.ai.provider": {
           "type": "string",
           "default": "openai",
-          "enum": [
-            "openai",
-            "azure",
-            "qwen",
-            "custom"
-          ],
+          "enum": ["openai", "azure", "qwen", "custom"],
           "description": "AI 提供商",
           "order": 40
         },
@@ -197,7 +244,7 @@
           "default": 0.7,
           "minimum": 0,
           "maximum": 2,
-          "description": "生成温度（0-2）",
+          "description": "生成温度，范围 0-2",
           "order": 43
         },
         "promptHub.ui.showEmojiPicker": {
@@ -209,16 +256,8 @@
         "promptHub.ui.sortBy": {
           "type": "string",
           "default": "recent",
-          "enum": [
-            "recent",
-            "name",
-            "created"
-          ],
-          "enumDescriptions": [
-            "最近使用",
-            "名称",
-            "创建时间"
-          ],
+          "enum": ["recent", "name", "created"],
+          "enumDescriptions": ["最近使用", "名称", "创建时间"],
           "description": "排序方式",
           "order": 51
         }
@@ -232,7 +271,8 @@
     "pretest": "npm run compile && npm run lint",
     "lint": "eslint src --ext ts",
     "test": "node ./out/test/runTest.js",
-    "package": "vsce package"
+    "package": "vsce package",
+    "postinstall": "npm run compile || echo 'compile skipped'"
   },
   "devDependencies": {
     "@types/glob": "^8.1.0",
@@ -257,5 +297,5 @@
     "url": "https://github.com/your-username/prompt-hub"
   },
   "license": "MIT",
-  "icon": "resources/icon.png"
+  "icon": "resources/icon.svg"
 }

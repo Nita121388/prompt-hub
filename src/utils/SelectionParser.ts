@@ -7,7 +7,8 @@ import { ConfigurationService } from '../services/ConfigurationService';
  */
 export class SelectionParser {
   private readonly PROMPT_HEADER_REGEX = /^#\s*prompt\s*:\s*(.+)$/i;
-  private readonly EMOJI_REGEX = /^(\p{Emoji})\s*(.+)$/u;
+  // 兼容性考虑：使用常见 emoji 范围匹配开头的 1 个字符
+  private readonly EMOJI_REGEX = /^([\u231A-\u27BF\u{1F300}-\u{1FAFF}])\s*(.+)$/u;
 
   constructor(private configService: ConfigurationService) {}
 
