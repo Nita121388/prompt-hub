@@ -37,6 +37,7 @@ export class CommandRegistrar {
     this.register('promptHub.aiGenerateMeta', (prompt?: Prompt) => this.aiGenerateMeta(prompt));
     this.register('promptHub.aiOptimize', (prompt?: Prompt) => this.aiOptimize(prompt));
     this.register('promptHub.gitSync', () => this.gitSync());
+    this.register('promptHub.showQuickPick', () => this.showQuickPick());
   }
 
   /** 注册命令工具 */
@@ -123,6 +124,15 @@ export class CommandRegistrar {
   /** 复制 Prompt 内容 */
   private async copyPromptContent(prompt: Prompt): Promise<void> {
     await vscode.env.clipboard.writeText(prompt.content);
+    // 记录使用次数
+    const usage = new UsageLogService(this.configService);
+    await usage.record({
+      id: generateId(),
+      timestamp: new Date().toISOString(),
+      operation: 'meta',
+      promptId: prompt.id,
+      status: 'success',
+    });
     vscode.window.showInformationMessage(`已复制 "${prompt.name}"`);
   }
 
@@ -218,6 +228,69 @@ export class CommandRegistrar {
       await git.sync();
     });
     vscode.window.showInformationMessage('Git 同步完成');
+  }
+
+  /** 显示快速访问菜单 */
+  private async showQuickPick(): Promise<void> {
+    const items = [
+      {
+        label: '📝 新建 Prompt',
+        description: '创建新的 Prompt 文件',
+        action: 'new',
+      },
+      {
+        label: '🔍 搜索 Prompt',
+        description: '搜索并复制 Prompt',
+        action: 'search',
+      },
+      {
+        label: '✂️ 从选区创建',
+        description: '从当前选中的文本创建 Prompt',
+        action: 'fromSelection',
+      },
+      {
+        label: '🔄 刷新视图',
+        description: '重新加载 Prompt 列表',
+        action: 'refresh',
+      },
+      {
+        label: '🔀 Git 同步',
+        description: '同步 Prompt 到远程仓库',
+        action: 'git',
+      },
+      {
+        label: '⚙️ 打开设置',
+        description: '配置 Prompt Hub',
+        action: 'settings',
+      },
+    ];
+
+    const picked = await vscode.window.showQuickPick(items, {
+      placeHolder: '选择要执行的操作',
+    });
+
+    if (!picked) return;
+
+    switch (picked.action) {
+      case 'new':
+        await this.newPromptFile();
+        break;
+      case 'search':
+        await this.searchPrompt();
+        break;
+      case 'fromSelection':
+        await this.createFromSelection();
+        break;
+      case 'refresh':
+        await this.refreshView();
+        break;
+      case 'git':
+        await this.gitSync();
+        break;
+      case 'settings':
+        this.openSettings();
+        break;
+    }
   }
 
   /** 若未传入 Prompt，则让用户选择 */

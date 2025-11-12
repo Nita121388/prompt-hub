@@ -2,6 +2,7 @@ import * as vscode from 'vscode';
 import { Prompt } from '../types/Prompt';
 import { PromptStorageService } from '../services/PromptStorageService';
 import { ConfigurationService } from '../services/ConfigurationService';
+import { UsageLogService } from '../services/UsageLogService';
 
 /**
  * Prompt TreeView Provider（支持标签分组）
@@ -30,7 +31,41 @@ export class PromptTreeProvider implements vscode.TreeDataProvider<vscode.TreeIt
 
   /** 获取子节点 */
   async getChildren(element?: vscode.TreeItem): Promise<vscode.TreeItem[]> {
-    const prompts = this.storageService.list();
+    let prompts = this.storageService.list();
+
+    // 获取排序方式
+    const sortBy = this.configService.get<string>('ui.sortBy', 'recent');
+
+    // 按排序方式排序
+    if (sortBy === 'usage') {
+      // 按使用次数排序
+      const usageService = new UsageLogService(this.configService);
+      const logs = await usageService.readAll();
+      const usageCount = new Map<string, number>();
+
+      // 统计每个 Prompt 的使用次数
+      logs.forEach(log => {
+        if (log.promptId) {
+          usageCount.set(log.promptId, (usageCount.get(log.promptId) || 0) + 1);
+        }
+      });
+
+      // 排序：使用次数多的在前
+      prompts.sort((a, b) => {
+        const countA = usageCount.get(a.id) || 0;
+        const countB = usageCount.get(b.id) || 0;
+        return countB - countA;
+      });
+    } else if (sortBy === 'name') {
+      // 按名称排序
+      prompts.sort((a, b) => a.name.localeCompare(b.name));
+    } else if (sortBy === 'created') {
+      // 按创建时间排序
+      prompts.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+    } else {
+      // 默认按更新时间排序（recent）
+      prompts.sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime());
+    }
 
     if (!element) {
       // 根节点：按标签分组

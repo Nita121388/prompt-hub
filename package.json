@@ -27,64 +27,83 @@
     "commands": [
       {
         "command": "promptHub.createFromSelection",
-        "title": "Prompt Hub: 从选区创建",
+        "title": "✂️ 从选区创建",
         "category": "Prompt Hub"
       },
       {
         "command": "promptHub.newPromptFile",
-        "title": "Prompt Hub: 新建 Prompt 文件",
-        "category": "Prompt Hub"
+        "title": "📝 新建 Prompt 文件",
+        "category": "Prompt Hub",
+        "icon": "$(new-file)"
       },
       {
         "command": "promptHub.aiGenerateMeta",
-        "title": "Prompt Hub: 生成标题/emoji",
+        "title": "✨ 生成标题/emoji",
         "category": "Prompt Hub"
       },
       {
         "command": "promptHub.aiOptimize",
-        "title": "Prompt Hub: 优化 Prompt 内容",
+        "title": "🚀 优化 Prompt 内容",
         "category": "Prompt Hub"
       },
       {
         "command": "promptHub.gitSync",
-        "title": "Prompt Hub: Git 同步",
-        "category": "Prompt Hub"
+        "title": "🔀 Git 同步",
+        "category": "Prompt Hub",
+        "icon": "$(sync)"
       },
       {
         "command": "promptHub.searchPrompt",
-        "title": "Prompt Hub: 搜索 Prompt",
+        "title": "🔍 搜索 Prompt",
         "category": "Prompt Hub"
       },
       {
         "command": "promptHub.copyPromptContent",
-        "title": "Prompt Hub: 复制内容",
-        "category": "Prompt Hub"
+        "title": "📋 复制内容",
+        "category": "Prompt Hub",
+        "icon": "$(copy)"
       },
       {
         "command": "promptHub.deletePrompt",
-        "title": "Prompt Hub: 删除 Prompt",
+        "title": "🗑️ 删除 Prompt",
         "category": "Prompt Hub"
       },
       {
         "command": "promptHub.refreshView",
-        "title": "Prompt Hub: 刷新视图",
+        "title": "🔄 刷新视图",
         "category": "Prompt Hub",
         "icon": "$(refresh)"
       },
       {
         "command": "promptHub.openSettings",
-        "title": "Prompt Hub: 打开设置",
-        "category": "Prompt Hub"
+        "title": "⚙️ 打开设置",
+        "category": "Prompt Hub",
+        "icon": "$(settings-gear)"
       },
       {
         "command": "promptHub.startOnboarding",
-        "title": "Prompt Hub: 配置向导",
+        "title": "🎯 配置向导",
         "category": "Prompt Hub"
       },
       {
         "command": "promptHub.resetOnboarding",
-        "title": "Prompt Hub: 重置配置向导",
+        "title": "🔄 重置配置向导",
         "category": "Prompt Hub"
+      },
+      {
+        "command": "promptHub.showQuickPick",
+        "title": "📋 Prompt Hub: 快速访问",
+        "category": "Prompt Hub"
+      }
+    ],
+    "submenus": [
+      {
+        "id": "promptHub.editorContext",
+        "label": "📋 Prompt Hub"
+      },
+      {
+        "id": "promptHub.promptItemContext",
+        "label": "🤖 AI & 更多"
       }
     ],
     "viewsContainers": {
@@ -107,9 +126,16 @@
     "menus": {
       "editor/context": [
         {
+          "submenu": "promptHub.editorContext",
+          "when": "editorHasSelection",
+          "group": "9_cutcopypaste"
+        }
+      ],
+      "promptHub.editorContext": [
+        {
           "command": "promptHub.createFromSelection",
           "when": "editorHasSelection",
-          "group": "1_modification"
+          "group": "1_prompts"
         }
       ],
       "view/title": [
@@ -141,19 +167,26 @@
           "group": "inline@1"
         },
         {
+          "submenu": "promptHub.promptItemContext",
+          "when": "view == promptHubView && viewItem == prompt",
+          "group": "navigation"
+        }
+      ],
+      "promptHub.promptItemContext": [
+        {
           "command": "promptHub.aiGenerateMeta",
           "when": "view == promptHubView && viewItem == prompt",
-          "group": "inline@2"
+          "group": "1_ai"
         },
         {
           "command": "promptHub.aiOptimize",
           "when": "view == promptHubView && viewItem == prompt",
-          "group": "inline@3"
+          "group": "1_ai"
         },
         {
           "command": "promptHub.deletePrompt",
           "when": "view == promptHubView && viewItem == prompt",
-          "group": "navigation@99"
+          "group": "2_danger"
         }
       ]
     },
@@ -256,10 +289,16 @@
         "promptHub.ui.sortBy": {
           "type": "string",
           "default": "recent",
-          "enum": ["recent", "name", "created"],
-          "enumDescriptions": ["最近使用", "名称", "创建时间"],
+          "enum": ["recent", "name", "created", "usage"],
+          "enumDescriptions": ["最近使用", "名称", "创建时间", "使用次数"],
           "description": "排序方式",
           "order": 51
+        },
+        "promptHub.statusBar.enable": {
+          "type": "boolean",
+          "default": true,
+          "description": "是否显示状态栏图标",
+          "order": 52
         }
       }
     }

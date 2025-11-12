@@ -5,6 +5,7 @@ import { OnboardingWizard } from './services/OnboardingWizard';
 import { CommandRegistrar } from './commands/CommandRegistrar';
 import { PromptTreeProvider } from './providers/PromptTreeProvider';
 import { MarkdownMirrorService } from './services/MarkdownMirrorService';
+import { StatusBarService } from './services/StatusBarService';
 
 /**
  * 插件激活时调用
@@ -37,6 +38,9 @@ export async function activate(context: vscode.ExtensionContext) {
     const mirrorService = new MarkdownMirrorService(storageService, configService);
     mirrorService.bindOnSave(context);
     mirrorService.bindOnStorageChange(context);
+
+    // 初始化状态栏
+    const statusBarService = new StatusBarService(context, configService);
 
     // 首次使用引导
     const onboardingCompleted = context.globalState.get<boolean>(
