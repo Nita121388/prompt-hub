@@ -39,3 +39,133 @@
 选项 C：显示最近使用的 Prompt 列表
 显示文本：是否需要显示文本（如 "Prompt Hub"），还是只显示图标？
 请确认这些细节，我就开始实现！ 🚀
+
+优化：
+【从选取创建prompt】
+# Test3
+从选取创建prompt，第一行内容为"# xxxx",也可以解析为标题
+
+注意更新单元测试和相关文档
+
+新功能点：
+1. 预览区域支持打开本地Prompt仓库所在文件夹
+2. 预览界面中，点击对应的prompt,右键菜单可以直接显示支持的菜单内容，不用集成在AI&更多这个父级菜单中
+3. 预览界面中，点击对应的prompt,右键菜单可以直接显示在预览中每行后面，用一个emoji
+z作为一个按钮
+4. 预览界面中，右键显示和状态栏一样的可选菜单
+
+
+那我觉得
+# Prompt来识别为prompt标题就没有有必要了
+
+
+我希望直接进入目录而不是高亮目录
+
+我想要运行并测试插件，但是运行起来的VSCode示例包含旧数据 
+我想要重新开始测试应该如何做？
+
+Bug:
+1. 
+侧边栏界面，点击新建Prompt，显示以下内容：
+# prompt: 在此填写标题
+
+在此编写 Prompt 正文内容...
+
+
+
+什么也不做直接保存后，侧边栏不显示对新建的prompt —— 在此填写标题.但是只要修改了内容就可以保存起来。这是为什么
+
+[PromptFileService] 开始创建新 Prompt 文件
+extensionHostProcess.js:216
+[PromptFileService] 存储路径: C:\Users\break\.prompt-hub
+extensionHostProcess.js:216
+[PromptFileService] 文件名模板: prompt-{timestamp}.md
+extensionHostProcess.js:216
+[PromptFileService] 生成的默认文件名: prompt-20251125-175429.md
+extensionHostProcess.js:216
+[PromptFileService] 清洗后的文件名: prompt-20251125-175429.md
+extensionHostProcess.js:216
+[PromptFileService] 最终文件路径: C:\Users\break\.prompt-hub\prompt-20251125-175429.md
+extensionHostProcess.js:216
+[PromptFileService] 文件内容长度: 83 字符
+extensionHostProcess.js:216
+[PromptFileService] 文件内容预览: # prompt: 在此填写标题
+extensionHostProcess.js:216
+
+extensionHostProcess.js:216
+在此编写 Prompt 正文内容...
+extensionHostProcess.js:216
+
+extensionHostProcess.js:216
+
+extensionHostProcess.js:216
+
+extensionHostProcess.js:216
+[PromptFileService] 文件写入成功
+extensionHostProcess.js:216
+[PromptFileService] 文档已打开到编辑器
+extensionHostProcess.js:216
+[PromptFileService] 自动保存文档以触发同步
+extensionHostProcess.js:216
+[PromptFileService] 文档已保存，应该触发MarkdownMirrorService.onDidSave事件
+extensionHostProcess.js:216
+[PromptFileService] 新 Prompt 文件创建完成
+
+
+
+
+我希望本项目的prompt内容的格式符合obsidian的格式，
+你有什么建议？
+
+
+3082371528213353784超值Claude Code3日体验k3日体验卡5_27:
+KEY：sk_27615496dbdacf1a693c7492238bf5356dade778a295888b59d240027a797b39
+教程请查看https://hongmacode.com/admin-next/api-stats；
+环境变量中配置 ANTHROPIC_BASE_URL = "https://hongmacode.com/api
+
+请你输出详细的修改方案、步骤，要完整包括设计文档和单元测试
+
+新建Prompt时，我觉得标题的位置可以优化一下在最上面，你觉得呢？
+如果修改这点，会修改哪些内容？功能？文档？单元测试？
+
+
+问题：
+现状：
+1. 新建Prompt,文件的标题默认为prompt-20251126-195738.md
+2. 文件内的格式为
+---
+id: 1764158258442-3bsg95d
+type: prompt
+tags: [prompt]
+---
+
+# 在此填写标题
+
+在此编写 Prompt 正文内容...
+
+
+3. 保存文件后，文件名、TreeView显示的标题名都任然保持着prompt-20251126-195738.md
+
+期望修改：
+3. 保存文件后，文件名替换为在此填写标题的内容
+4. 如果存在同名文件，自动+1
+如果修改这点，会修改哪些内容？功能？文档？单元测试？
+
+
+TODO:
+1. 那么新建的文件如果没有进行命名
+1. TreeView区域右键希望有和状态栏菜单点击一样显示菜单。
+2. 菜单中为什么没有看到新手引导配置了？我记得之前有的
+3. 这个区域的内容可以去掉吗？
+
+新建Prompt,文件内的格式为
+---
+id: 1764158258442-3bsg95d
+type: prompt
+tags: [prompt]
+---
+
+# 在此填写标题
+
+在此编写 Prompt 正文内容...
+

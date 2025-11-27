@@ -34,8 +34,11 @@ export async function activate(context: vscode.ExtensionContext) {
     );
     commandRegistrar.registerAll();
 
-    // 绑定 Markdown 保存与导出镜像
+    console.log('[Extension] 开始初始化 MarkdownMirrorService');
     const mirrorService = new MarkdownMirrorService(storageService, configService);
+    console.log('[Extension] MarkdownMirrorService 已创建');
+    console.log('[Extension] bindOnSave 已调用');
+    console.log('[Extension] bindOnStorageChange 已调用');
     mirrorService.bindOnSave(context);
     mirrorService.bindOnStorageChange(context);
 

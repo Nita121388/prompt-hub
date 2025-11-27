@@ -15,13 +15,19 @@ export class PromptTreeProvider implements vscode.TreeDataProvider<vscode.TreeIt
     private storageService: PromptStorageService,
     private configService: ConfigurationService
   ) {
+    console.log('[PromptTreeProvider] 初始化TreeProvider');
     // 监听存储变更
-    storageService.onDidChangePrompts(() => this.refresh());
+    storageService.onDidChangePrompts(() => {
+      console.log('[PromptTreeProvider] 收到存储变更事件，触发刷新');
+      this.refresh();
+    });
   }
 
   /** 刷新视图 */
   refresh(): void {
+    console.log('[PromptTreeProvider] 执行refresh()，触发 _onDidChangeTreeData.fire()');
     this._onDidChangeTreeData.fire();
+    console.log('[PromptTreeProvider] 树视图刷新事件已触发');
   }
 
   /** 获取树节点 */
@@ -31,10 +37,13 @@ export class PromptTreeProvider implements vscode.TreeDataProvider<vscode.TreeIt
 
   /** 获取子节点 */
   async getChildren(element?: vscode.TreeItem): Promise<vscode.TreeItem[]> {
+    console.log('[PromptTreeProvider] getChildren被调用，element:', element?.label);
     let prompts = this.storageService.list();
+    console.log('[PromptTreeProvider] 获取到的Prompt数量:', prompts.length);
 
     // 获取排序方式
     const sortBy = this.configService.get<string>('ui.sortBy', 'recent');
+    console.log('[PromptTreeProvider] 排序方式:', sortBy);
 
     // 按排序方式排序
     if (sortBy === 'usage') {
@@ -112,7 +121,7 @@ class PromptTreeItem extends vscode.TreeItem {
     this.command = {
       command: 'promptHub.copyPromptContent',
       title: '复制',
-      arguments: [prompt],
+      arguments: [this],
     };
   }
 }

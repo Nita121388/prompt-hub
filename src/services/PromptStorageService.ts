@@ -90,6 +90,8 @@ export class PromptStorageService {
    * 保存 Prompt 数据
    */
   private async save(): Promise<void> {
+    console.log('[PromptStorageService] 开始保存数据，Prompt总数:', this.prompts.length);
+
     const storage: PromptStorage = {
       version: this.STORAGE_VERSION,
       prompts: this.prompts,
@@ -97,14 +99,19 @@ export class PromptStorageService {
     };
 
     const json = JSON.stringify(storage, null, 2);
+    console.log('[PromptStorageService] JSON长度:', json.length, '字符');
 
     // 使用临时文件 + 原子重命名策略
     const tempFile = `${this.storageFile}.tmp`;
+    console.log('[PromptStorageService] 存储文件路径:', this.storageFile);
 
     try {
       await fs.writeFile(tempFile, json, 'utf-8');
+      console.log('[PromptStorageService] 临时文件写入成功');
       await fs.rename(tempFile, this.storageFile);
+      console.log('[PromptStorageService] 文件重命名成功');
     } catch (error) {
+      console.error('[PromptStorageService] 保存失败:', error);
       // 清理临时文件
       try {
         await fs.unlink(tempFile);
@@ -113,7 +120,9 @@ export class PromptStorageService {
     }
 
     // 触发变更事件
+    console.log('[PromptStorageService] 触发变更事件 _onDidChangePrompts.fire()');
     this._onDidChangePrompts.fire();
+    console.log('[PromptStorageService] 变更事件已触发');
   }
 
   /**
@@ -134,22 +143,30 @@ export class PromptStorageService {
    * 添加新 Prompt
    */
   async add(prompt: Prompt): Promise<void> {
+    console.log('[PromptStorageService] 添加新Prompt - id:', prompt.id, ', name:', prompt.name);
+
     // 检查名称是否重复
     if (this.prompts.some((p) => p.name === prompt.name)) {
+      console.log('[PromptStorageService] Prompt名称重复:', prompt.name);
       throw new Error(`Prompt 名称 "${prompt.name}" 已存在`);
     }
 
     this.prompts.push(prompt);
+    console.log('[PromptStorageService] Prompt已添加到内存，当前总数:', this.prompts.length);
     await this.save();
+    console.log('[PromptStorageService] Prompt已保存到文件，事件已触发');
   }
 
   /**
    * 更新 Prompt
    */
   async update(prompt: Prompt): Promise<void> {
+    console.log('[PromptStorageService] 更新Prompt - id:', prompt.id, ', name:', prompt.name);
+
     const index = this.prompts.findIndex((p) => p.id === prompt.id);
 
     if (index === -1) {
+      console.log('[PromptStorageService] Prompt ID不存在:', prompt.id);
       throw new Error(`Prompt ID "${prompt.id}" 不存在`);
     }
 
@@ -157,26 +174,50 @@ export class PromptStorageService {
     if (
       this.prompts.some((p) => p.id !== prompt.id && p.name === prompt.name)
     ) {
+      console.log('[PromptStorageService] Prompt名称冲突:', prompt.name);
       throw new Error(`Prompt 名称 "${prompt.name}" 已存在`);
     }
 
     prompt.updatedAt = new Date().toISOString();
     this.prompts[index] = prompt;
+    console.log('[PromptStorageService] Prompt已更新，位置:', index);
     await this.save();
+    console.log('[PromptStorageService] Prompt更新已保存，事件已触发');
   }
 
   /**
    * 删除 Prompt
    */
   async remove(id: string): Promise<Prompt | undefined> {
+    console.log('[PromptStorageService] 开始删除Prompt - id:', id);
     const index = this.prompts.findIndex((p) => p.id === id);
 
     if (index === -1) {
+      console.log('[PromptStorageService] Prompt ID不存在，无法删除');
       return undefined;
     }
 
-    const removed = this.prompts.splice(index, 1)[0];
+    const removed = this.prompts[index];
+    console.log('[PromptStorageService] 找到Prompt - name:', removed.name, ', sourceFile:', removed.sourceFile);
+
+    // 删除 Prompt 数据
+    this.prompts.splice(index, 1);
+    console.log('[PromptStorageService] Prompt已从内存中移除，剩余:', this.prompts.length);
+
+    // 如果有关联的 Markdown 文件，也删除它
+    if (removed.sourceFile) {
+      try {
+        console.log('[PromptStorageService] 尝试删除关联的Markdown文件:', removed.sourceFile);
+        await fs.unlink(removed.sourceFile);
+        console.log('[PromptStorageService] Markdown文件已删除');
+      } catch (err) {
+        console.error('[PromptStorageService] 删除Markdown文件失败:', err);
+        // 即使文件删除失败，也继续删除 Prompt 数据
+      }
+    }
+
     await this.save();
+    console.log('[PromptStorageService] Prompt删除完成，事件已触发');
 
     return removed;
   }

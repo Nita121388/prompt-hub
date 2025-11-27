@@ -44,7 +44,8 @@
       {
         "command": "promptHub.aiOptimize",
         "title": "🚀 优化 Prompt 内容",
-        "category": "Prompt Hub"
+        "category": "Prompt Hub",
+        "icon": "$(sparkle)"
       },
       {
         "command": "promptHub.gitSync",
@@ -64,9 +65,16 @@
         "icon": "$(copy)"
       },
       {
+        "command": "promptHub.editPrompt",
+        "title": "✏️ 编辑 Prompt",
+        "category": "Prompt Hub",
+        "icon": "$(edit)"
+      },
+      {
         "command": "promptHub.deletePrompt",
         "title": "🗑️ 删除 Prompt",
-        "category": "Prompt Hub"
+        "category": "Prompt Hub",
+        "icon": "$(trash)"
       },
       {
         "command": "promptHub.refreshView",
@@ -81,6 +89,12 @@
         "icon": "$(settings-gear)"
       },
       {
+        "command": "promptHub.openStorageFolder",
+        "title": "📂 打开 Prompt 仓库文件夹",
+        "category": "Prompt Hub",
+        "icon": "$(folder-opened)"
+      },
+      {
         "command": "promptHub.startOnboarding",
         "title": "🎯 配置向导",
         "category": "Prompt Hub"
@@ -93,17 +107,14 @@
       {
         "command": "promptHub.showQuickPick",
         "title": "📋 Prompt Hub: 快速访问",
-        "category": "Prompt Hub"
+        "category": "Prompt Hub",
+        "icon": "$(list-selection)"
       }
     ],
     "submenus": [
       {
         "id": "promptHub.editorContext",
         "label": "📋 Prompt Hub"
-      },
-      {
-        "id": "promptHub.promptItemContext",
-        "label": "🤖 AI & 更多"
       }
     ],
     "viewsContainers": {
@@ -150,12 +161,22 @@
           "group": "navigation"
         },
         {
+          "command": "promptHub.openStorageFolder",
+          "when": "view == promptHubView",
+          "group": "navigation"
+        },
+        {
           "command": "promptHub.newPromptFile",
           "when": "view == promptHubView",
           "group": "navigation"
         },
         {
           "command": "promptHub.gitSync",
+          "when": "view == promptHubView",
+          "group": "navigation"
+        },
+        {
+          "command": "promptHub.showQuickPick",
           "when": "view == promptHubView",
           "group": "navigation"
         }
@@ -167,26 +188,44 @@
           "group": "inline@1"
         },
         {
-          "submenu": "promptHub.promptItemContext",
+          "command": "promptHub.editPrompt",
           "when": "view == promptHubView && viewItem == prompt",
-          "group": "navigation"
-        }
-      ],
-      "promptHub.promptItemContext": [
-        {
-          "command": "promptHub.aiGenerateMeta",
-          "when": "view == promptHubView && viewItem == prompt",
-          "group": "1_ai"
+          "group": "inline@2"
         },
         {
           "command": "promptHub.aiOptimize",
           "when": "view == promptHubView && viewItem == prompt",
-          "group": "1_ai"
+          "group": "inline@3"
         },
         {
           "command": "promptHub.deletePrompt",
           "when": "view == promptHubView && viewItem == prompt",
-          "group": "2_danger"
+          "group": "inline@4"
+        },
+        {
+          "command": "promptHub.copyPromptContent",
+          "when": "view == promptHubView && viewItem == prompt",
+          "group": "1_basic@1"
+        },
+        {
+          "command": "promptHub.editPrompt",
+          "when": "view == promptHubView && viewItem == prompt",
+          "group": "1_basic@2"
+        },
+        {
+          "command": "promptHub.aiGenerateMeta",
+          "when": "view == promptHubView && viewItem == prompt",
+          "group": "2_ai@1"
+        },
+        {
+          "command": "promptHub.aiOptimize",
+          "when": "view == promptHubView && viewItem == prompt",
+          "group": "2_ai@2"
+        },
+        {
+          "command": "promptHub.deletePrompt",
+          "when": "view == promptHubView && viewItem == prompt",
+          "group": "3_danger"
         }
       ]
     },
@@ -207,8 +246,8 @@
         },
         "promptHub.markdown.enableMirror": {
           "type": "boolean",
-          "default": false,
-          "description": "是否启用 Markdown 镜像",
+          "default": true,
+          "markdownDescription": "是否启用 Markdown 镜像（将Markdown文件自动同步到Prompt存储）。\n\n**建议保持启用**，否则新建的Prompt文件不会显示在侧边栏。\n\n禁用后，只有通过「从选区创建」的Prompt才会显示。",
           "order": 10
         },
         "promptHub.markdown.filenameTemplate": {

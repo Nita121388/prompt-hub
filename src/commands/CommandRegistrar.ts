@@ -1,4 +1,5 @@
 import * as vscode from 'vscode';
+import * as os from 'os';
 import Fuse from 'fuse.js';
 import { PromptStorageService } from '../services/PromptStorageService';
 import { ConfigurationService } from '../services/ConfigurationService';
@@ -28,12 +29,14 @@ export class CommandRegistrar {
     this.register('promptHub.createFromSelection', () => this.createFromSelection());
     this.register('promptHub.newPromptFile', () => this.newPromptFile());
     this.register('promptHub.searchPrompt', () => this.searchPrompt());
-    this.register('promptHub.copyPromptContent', (prompt: Prompt) => this.copyPromptContent(prompt));
+    this.register('promptHub.copyPromptContent', (context?: any) => this.copyPromptContent(context));
+    this.register('promptHub.editPrompt', (context?: any) => this.editPrompt(context));
     this.register('promptHub.refreshView', () => this.refreshView());
     this.register('promptHub.openSettings', () => this.openSettings());
+    this.register('promptHub.openStorageFolder', () => this.openStorageFolder());
     this.register('promptHub.startOnboarding', () => this.startOnboarding());
     this.register('promptHub.resetOnboarding', () => this.resetOnboarding());
-    this.register('promptHub.deletePrompt', (prompt: Prompt) => this.deletePrompt(prompt));
+    this.register('promptHub.deletePrompt', (context?: any) => this.deletePrompt(context));
     this.register('promptHub.aiGenerateMeta', (prompt?: Prompt) => this.aiGenerateMeta(prompt));
     this.register('promptHub.aiOptimize', (prompt?: Prompt) => this.aiOptimize(prompt));
     this.register('promptHub.gitSync', () => this.gitSync());
@@ -87,7 +90,32 @@ export class CommandRegistrar {
   /** 新建 Prompt 文件 */
   private async newPromptFile(): Promise<void> {
     try {
-      const fileService = new PromptFileService(this.configService);
+      // 检查Markdown镜像是否启用
+      const enableMirror = this.configService.get<boolean>('markdown.enableMirror', true);
+
+      if (!enableMirror) {
+        // 如果未启用，提示用户并自动启用
+        const result = await vscode.window.showInformationMessage(
+          '为了让新建的Prompt显示在侧边栏，需要启用"Markdown镜像"功能。是否现在启用？',
+          '启用',
+          '取消'
+        );
+
+        if (result === '启用') {
+          // 更新配置（全局）
+          await vscode.workspace.getConfiguration('promptHub').update(
+            'markdown.enableMirror',
+            true,
+            vscode.ConfigurationTarget.Global
+          );
+          vscode.window.showInformationMessage('✅ 已启用Markdown镜像，现在可以创建Prompt了');
+        } else {
+          vscode.window.showWarningMessage('已取消创建。提示：如需手动启用，请在设置中搜索 "promptHub.markdown.enableMirror"');
+          return;
+        }
+      }
+
+      const fileService = new PromptFileService(this.configService, this.storageService);
       await fileService.createPromptFile();
     } catch (error) {
       vscode.window.showErrorMessage(`新建 Prompt 文件失败: ${error instanceof Error ? error.message : String(error)}`);
@@ -122,7 +150,24 @@ export class CommandRegistrar {
   }
 
   /** 复制 Prompt 内容 */
-  private async copyPromptContent(prompt: Prompt): Promise<void> {
+  private async copyPromptContent(context?: any): Promise<void> {
+    let prompt: Prompt | undefined;
+
+    if (context) {
+      // 如果 context 已经是 Prompt 对象
+      if (context.id && context.name && context.content) {
+        prompt = context as Prompt;
+      } else if ((context as any).prompt) {
+        // 如果 context 有 prompt 属性（来自 PromptTreeItem）
+        prompt = (context as any).prompt;
+      }
+    }
+
+    if (!prompt) {
+      vscode.window.showErrorMessage('无法确定要复制的 Prompt');
+      return;
+    }
+
     await vscode.env.clipboard.writeText(prompt.content);
     // 记录使用次数
     const usage = new UsageLogService(this.configService);
@@ -136,6 +181,35 @@ export class CommandRegistrar {
     vscode.window.showInformationMessage(`已复制 "${prompt.name}"`);
   }
 
+  /** 编辑 Prompt */
+  private async editPrompt(context?: any): Promise<void> {
+    let prompt: Prompt | undefined;
+
+    if (context) {
+      // 如果 context 已经是 Prompt 对象
+      if (context.id && context.name) {
+        prompt = context as Prompt;
+      } else if ((context as any).prompt) {
+        // 如果 context 有 prompt 属性（来自 PromptTreeItem）
+        prompt = (context as any).prompt;
+      }
+    }
+
+    if (!prompt) {
+      vscode.window.showErrorMessage('无法确定要编辑的 Prompt');
+      return;
+    }
+
+    if (!prompt.sourceFile) {
+      vscode.window.showWarningMessage('此 Prompt 没有关联的源文件');
+      return;
+    }
+
+    // 打开源文件进行编辑
+    const doc = await vscode.workspace.openTextDocument(prompt.sourceFile);
+    await vscode.window.showTextDocument(doc, { preview: false });
+  }
+
   /** 刷新视图 */
   private async refreshView(): Promise<void> {
     await this.storageService.refresh();
@@ -145,6 +219,37 @@ export class CommandRegistrar {
   /** 打开设置 */
   private openSettings(): void {
     this.configService.openSettings();
+  }
+
+  /** 打开本地 Prompt 仓库文件夹 */
+  private async openStorageFolder(): Promise<void> {
+    const storagePath = this.configService.get<string>('storagePath', '~/.prompt-hub');
+    const resolvedPath = this.resolvePath(storagePath);
+
+    // storagePath 本身就是存储目录，直接使用
+    // 使用 vscode.openExternal 直接打开文件夹（而不是高亮选中）
+    const uri = vscode.Uri.file(resolvedPath);
+    await vscode.env.openExternal(uri);
+  }
+
+  /** 解析路径（支持 ~ 和 ${workspaceFolder} 等变量） */
+  private resolvePath(configPath: string): string {
+    let resolved = configPath;
+
+    // 替换 ~
+    if (resolved.startsWith('~')) {
+      resolved = resolved.replace('~', os.homedir());
+    }
+
+    // 替换 ${workspaceFolder}
+    if (resolved.includes('${workspaceFolder}')) {
+      const workspaceFolder = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+      if (workspaceFolder) {
+        resolved = resolved.replace('${workspaceFolder}', workspaceFolder);
+      }
+    }
+
+    return resolved;
   }
 
   /** 启动引导 */
@@ -160,7 +265,36 @@ export class CommandRegistrar {
   }
 
   /** 删除 Prompt（右键菜单） */
-  private async deletePrompt(prompt: Prompt): Promise<void> {
+  private async deletePrompt(context?: any): Promise<void> {
+    console.log('[CommandRegistrar] deletePrompt called with context:', context);
+    console.log('[CommandRegistrar] context type:', typeof context);
+    if (context) {
+      console.log('[CommandRegistrar] context keys:', Object.keys(context));
+      if ((context as any).prompt) {
+        console.log('[CommandRegistrar] found prompt in context.prompt:', (context as any).prompt);
+      }
+    }
+
+    // 从树视图右键菜单调用时，VSCode 会传递树节点或其他上下文
+    // 我们需要从上下文中提取 Prompt 对象
+    let prompt: Prompt | undefined;
+
+    if (context) {
+      // 如果 context 已经是 Prompt 对象
+      if (context.id && context.name) {
+        prompt = context as Prompt;
+      } else if ((context as any).prompt) {
+        // 如果 context 有 prompt 属性（来自 PromptTreeItem）
+        prompt = (context as any).prompt;
+      }
+    }
+
+    if (!prompt) {
+      console.error('[CommandRegistrar] 无法确定要删除的 Prompt，context:', context);
+      vscode.window.showErrorMessage('无法确定要删除的 Prompt');
+      return;
+    }
+
     const answer = await vscode.window.showWarningMessage(
       `确认删除 Prompt：${prompt.name}？此操作不可撤销。`,
       { modal: true },
@@ -259,6 +393,11 @@ export class CommandRegistrar {
         action: 'git',
       },
       {
+        label: '🎯 配置向导',
+        description: '启动 Prompt Hub 配置向导',
+        action: 'onboarding',
+      },
+      {
         label: '⚙️ 打开设置',
         description: '配置 Prompt Hub',
         action: 'settings',
@@ -286,6 +425,9 @@ export class CommandRegistrar {
         break;
       case 'git':
         await this.gitSync();
+        break;
+      case 'onboarding':
+        await this.startOnboarding();
         break;
       case 'settings':
         this.openSettings();

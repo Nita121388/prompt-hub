@@ -96,6 +96,40 @@ suite('SelectionParser Test Suite', () => {
         assert.strictEqual(result.name, 'Test');
       });
     });
+
+    test('should parse standard Markdown H1 header', () => {
+      const text = '# Test3\nThis is the content';
+      const result = parser.parse(text);
+
+      assert.strictEqual(result.name, 'Test3');
+      assert.strictEqual(result.content, 'This is the content');
+      assert.strictEqual(result.emoji, undefined);
+    });
+
+    test('should parse Markdown H1 with emoji', () => {
+      const text = '# 🚀 My Title\nContent here';
+      const result = parser.parse(text);
+
+      assert.strictEqual(result.name, 'My Title');
+      assert.strictEqual(result.emoji, '🚀');
+      assert.strictEqual(result.content, 'Content here');
+    });
+
+    test('should prioritize # prompt: over # header', () => {
+      const text = '# prompt: Priority Test\n# Regular Header\nContent';
+      const result = parser.parse(text);
+
+      assert.strictEqual(result.name, 'Priority Test');
+      assert.strictEqual(result.content, '# Regular Header\nContent');
+    });
+
+    test('should handle Markdown H1 with multiline content', () => {
+      const text = '# MyPrompt\nLine 1\nLine 2\nLine 3';
+      const result = parser.parse(text);
+
+      assert.strictEqual(result.name, 'MyPrompt');
+      assert.strictEqual(result.content, 'Line 1\nLine 2\nLine 3');
+    });
   });
 
   suite('parse with removePromptMarker disabled', () => {
