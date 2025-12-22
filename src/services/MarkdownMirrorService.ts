@@ -59,7 +59,7 @@ export class MarkdownMirrorService {
   private async onDidSave(doc: vscode.TextDocument): Promise<void> {
     console.log('[MarkdownMirrorService] 检测到文件保存事件:', doc.uri.fsPath);
 
-    const enable = this.config.get<boolean>('markdown.enableMirror', false);
+    const enable = this.config.get<boolean>('markdown.enableMirror', true);
     console.log('[MarkdownMirrorService] Markdown镜像是否启用:', enable);
     if (!enable) {
       console.log('[MarkdownMirrorService] Markdown镜像未启用，跳过同步');
@@ -159,7 +159,7 @@ export class MarkdownMirrorService {
    * 导出全部 Prompt 到 Markdown（基于存储路径）
    */
   private async exportAllToMarkdown(): Promise<void> {
-    const enable = this.config.get<boolean>('markdown.enableMirror', false);
+    const enable = this.config.get<boolean>('markdown.enableMirror', true);
     if (!enable) return;
 
     const storagePath = this.config.getStoragePath();

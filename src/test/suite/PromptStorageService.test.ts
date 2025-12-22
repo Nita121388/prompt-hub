@@ -67,6 +67,32 @@ suite('PromptStorageService Test Suite', () => {
       assert.strictEqual(data.prompts.length, 0);
     });
 
+    test('should import markdown prompts under storage path', async () => {
+      await fs.mkdir(testStoragePath, { recursive: true });
+      const mdPath = path.join(testStoragePath, 'import-me.md');
+      const mdContent = [
+        '---',
+        'id: md-1',
+        'type: prompt',
+        'tags: [test]',
+        '---',
+        '',
+        '# 测试导入',
+        '',
+        '这里是正文内容',
+        '',
+      ].join('\n');
+      await fs.writeFile(mdPath, mdContent, 'utf-8');
+
+      await storageService.initialize();
+      const prompts = storageService.list();
+
+      assert.strictEqual(prompts.length, 1);
+      assert.strictEqual(prompts[0].id, 'md-1');
+      assert.strictEqual(prompts[0].name, '测试导入');
+      assert.strictEqual(prompts[0].sourceFile, mdPath);
+    });
+
     test('should load existing prompts.json', async () => {
       // 先初始化
       await storageService.initialize();
@@ -89,6 +115,31 @@ suite('PromptStorageService Test Suite', () => {
       const prompts = newService.list();
       assert.strictEqual(prompts.length, 1);
       assert.strictEqual(prompts[0].id, 'test-1');
+    });
+
+    test('should import new markdown files without duplicating existing prompts', async () => {
+      await storageService.initialize();
+
+      const prompt: Prompt = {
+        id: 'json-1',
+        name: 'From JSON',
+        content: 'json prompt',
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      };
+      await storageService.add(prompt);
+
+      const mdPath = path.join(testStoragePath, 'another.md');
+      const mdContent = ['# 另一个', '', '这是新增的 Markdown Prompt', ''].join('\n');
+      await fs.writeFile(mdPath, mdContent, 'utf-8');
+
+      const newService = new PromptStorageService(mockConfigService as any);
+      await newService.initialize();
+
+      const prompts = newService.list();
+      assert.strictEqual(prompts.length, 2);
+      assert.ok(prompts.find((p) => p.sourceFile === mdPath));
+      assert.ok(prompts.find((p) => p.id === 'json-1'));
     });
   });
 

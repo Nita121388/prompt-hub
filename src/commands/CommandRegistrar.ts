@@ -1,5 +1,8 @@
 import * as vscode from 'vscode';
 import * as os from 'os';
+import * as path from 'path';
+import * as cp from 'child_process';
+import * as util from 'util';
 import Fuse from 'fuse.js';
 import { PromptStorageService } from '../services/PromptStorageService';
 import { ConfigurationService } from '../services/ConfigurationService';
@@ -14,14 +17,65 @@ import { GitSyncService } from '../services/GitSyncService';
 import { UsageLogService } from '../services/UsageLogService';
 
 /**
- * 命令注册器：集中注册所有命令
+ * 命令注册器：负责注册所有 Prompt Hub 相关命令并实现具体逻辑
  */
 export class CommandRegistrar {
+  /** 将 child_process.exec 封装为 Promise，方便在命令中调用 CLI */
+  private readonly exec = util.promisify(cp.exec);
+
+  /** 带环境变量的 exec 封装，包含超时处理 */
+  private readonly execWithEnv = (command: string, env: NodeJS.ProcessEnv, timeout: number = 60000): Promise<{ stdout: string; stderr: string }> => {
+    return new Promise((resolve, reject) => {
+      console.log(`[PromptHub][execWithEnv] 执行命令: ${command}`);
+      console.log(`[PromptHub][execWithEnv] 超时设置: ${timeout}ms`);
+
+      const child = cp.exec(command, {
+        env,
+        encoding: 'utf8'
+      }, (error, stdout, stderr) => {
+        if (error) {
+          console.error(`[PromptHub][execWithEnv] 命令执行错误:`, error);
+          reject(error);
+        } else {
+          console.log(`[PromptHub][execWithEnv] 命令执行成功，stdout长度: ${stdout?.length || 0}, stderr长度: ${stderr?.length || 0}`);
+          resolve({ stdout: stdout || '', stderr: stderr || '' });
+        }
+      });
+
+      // 设置超时
+      const timer = setTimeout(() => {
+        console.error(`[PromptHub][execWithEnv] 命令执行超时 (${timeout}ms)`);
+        child.kill('SIGTERM');
+        reject(new Error(`命令执行超时 (${timeout}ms)`));
+      }, timeout);
+
+      // 监听进程退出
+      child.on('exit', (code, signal) => {
+        clearTimeout(timer);
+        console.log(`[PromptHub][execWithEnv] 进程退出，code: ${code}, signal: ${signal}`);
+      });
+
+      // 监听输出
+      if (child.stdout) {
+        child.stdout.on('data', (data) => {
+          console.log(`[PromptHub][execWithEnv] stdout:`, data.toString().trim());
+        });
+      }
+
+      if (child.stderr) {
+        child.stderr.on('data', (data) => {
+          console.log(`[PromptHub][execWithEnv] stderr:`, data.toString().trim());
+        });
+      }
+    });
+  };
+
   constructor(
-    private context: vscode.ExtensionContext,
-    private storageService: PromptStorageService,
-    private configService: ConfigurationService,
-    private treeProvider: PromptTreeProvider
+    private readonly context: vscode.ExtensionContext,
+    private readonly storageService: PromptStorageService,
+    private readonly configService: ConfigurationService,
+    private readonly treeProvider: PromptTreeProvider,
+    private readonly treeView?: vscode.TreeView<any>
   ) {}
 
   /** 注册所有命令 */
@@ -29,7 +83,9 @@ export class CommandRegistrar {
     this.register('promptHub.createFromSelection', () => this.createFromSelection());
     this.register('promptHub.newPromptFile', () => this.newPromptFile());
     this.register('promptHub.searchPrompt', () => this.searchPrompt());
-    this.register('promptHub.copyPromptContent', (context?: any) => this.copyPromptContent(context));
+    this.register('promptHub.copyPromptContent', (context?: any) =>
+      this.copyPromptContent(context)
+    );
     this.register('promptHub.editPrompt', (context?: any) => this.editPrompt(context));
     this.register('promptHub.refreshView', () => this.refreshView());
     this.register('promptHub.openSettings', () => this.openSettings());
@@ -37,99 +93,131 @@ export class CommandRegistrar {
     this.register('promptHub.startOnboarding', () => this.startOnboarding());
     this.register('promptHub.resetOnboarding', () => this.resetOnboarding());
     this.register('promptHub.deletePrompt', (context?: any) => this.deletePrompt(context));
-    this.register('promptHub.aiGenerateMeta', (prompt?: Prompt) => this.aiGenerateMeta(prompt));
-    this.register('promptHub.aiOptimize', (prompt?: Prompt) => this.aiOptimize(prompt));
     this.register('promptHub.gitSync', () => this.gitSync());
     this.register('promptHub.showQuickPick', () => this.showQuickPick());
+    this.register('promptHub.onPromptItemClick', (prompt?: Prompt) => this.onPromptTreeItemClick(prompt));
+    this.register('promptHub.batchGenerateMeta', () => this.batchGenerateMeta());
+    this.register('promptHub.batchGenerateMetaSelected', () =>
+      this.batchGenerateMetaSelected()
+    );
+    this.register('promptHub.optimizeMeta', (context?: any) => this.optimizeMeta(context));
+    this.register('promptHub.batchOptimizeMeta', () => this.batchOptimizeMeta());
   }
 
-  /** 注册命令工具 */
+  /** 注册单个命令的工具方法 */
   private register(command: string, callback: (...args: any[]) => any): void {
     const disposable = vscode.commands.registerCommand(command, callback);
     this.context.subscriptions.push(disposable);
   }
 
-  /** 从选区创建 Prompt */
+  /** 从编辑器选区创建 Prompt */
   private async createFromSelection(): Promise<void> {
     const editor = vscode.window.activeTextEditor;
     if (!editor) {
-      vscode.window.showWarningMessage('请先打开编辑器');
+      void vscode.window.showWarningMessage('请先打开一个编辑器。');
       return;
     }
+
     const selection = editor.document.getText(editor.selection);
     if (!selection) {
-      vscode.window.showWarningMessage('请先选中文本');
+      void vscode.window.showWarningMessage('请选择要保存为 Prompt 的文本。');
       return;
     }
+
     try {
       const parser = new SelectionParser(this.configService);
       const parsed = parser.parse(selection);
-      const name = await vscode.window.showInputBox({
-        prompt: '输入 Prompt 名称',
-        placeHolder: '例如：代码审查清单',
+
+      const nameInput = await vscode.window.showInputBox({
+        prompt: '请输入 Prompt 名称',
+        placeHolder: '例如：代码审查 Checklist',
         value: parsed.name,
       });
-      if (!name) return;
+      if (nameInput === undefined) return;
+
+      const sourceForDefault = parsed.content?.trim() ? parsed.content : selection;
+      const finalName = nameInput.trim()
+        ? nameInput.trim()
+        : this.generateDefaultPromptName(sourceForDefault);
+
+      const emojiInput = await vscode.window.showInputBox({
+        prompt: '请输入 Emoji（可选，可直接回车跳过）',
+        placeHolder: '例如：😊',
+        value: parsed.emoji,
+      });
+      if (emojiInput === undefined) return;
+      const finalEmoji = emojiInput.trim() || undefined;
+
+      const tagsInput = await vscode.window.showInputBox({
+        prompt: '请输入标签（多个标签用逗号或空格分隔，可留空）',
+        placeHolder: '例如：代码, 审查, 团队',
+      });
+      if (tagsInput === undefined) return;
+      const parsedTags = this.parseTagsInput(tagsInput);
+
       const prompt: Prompt = {
         id: generateId(),
-        name,
-        emoji: parsed.emoji,
+        name: finalName,
+        emoji: finalEmoji,
         content: parsed.content,
         createdAt: new Date().toISOString(),
         updatedAt: new Date().toISOString(),
         sourceFile: editor.document.uri.fsPath,
-        tags: [],
+        tags: parsedTags,
       };
+
       await this.storageService.add(prompt);
-      vscode.window.showInformationMessage(`已创建 Prompt "${name}"`);
+      this.treeProvider.refresh();
+      void vscode.window.showInformationMessage(`已创建 Prompt「${finalName}」`);
     } catch (error) {
-      vscode.window.showErrorMessage(`创建 Prompt 失败: ${error instanceof Error ? error.message : String(error)}`);
+      void vscode.window.showErrorMessage(
+        `创建 Prompt 失败：${error instanceof Error ? error.message : String(error)}`
+      );
     }
   }
 
   /** 新建 Prompt 文件 */
   private async newPromptFile(): Promise<void> {
     try {
-      // 检查Markdown镜像是否启用
-      const enableMirror = this.configService.get<boolean>('markdown.enableMirror', true);
-
-      if (!enableMirror) {
-        // 如果未启用，提示用户并自动启用
-        const result = await vscode.window.showInformationMessage(
-          '为了让新建的Prompt显示在侧边栏，需要启用"Markdown镜像"功能。是否现在启用？',
-          '启用',
-          '取消'
-        );
-
-        if (result === '启用') {
-          // 更新配置（全局）
-          await vscode.workspace.getConfiguration('promptHub').update(
-            'markdown.enableMirror',
-            true,
-            vscode.ConfigurationTarget.Global
-          );
-          vscode.window.showInformationMessage('✅ 已启用Markdown镜像，现在可以创建Prompt了');
-        } else {
-          vscode.window.showWarningMessage('已取消创建。提示：如需手动启用，请在设置中搜索 "promptHub.markdown.enableMirror"');
-          return;
-        }
-      }
-
       const fileService = new PromptFileService(this.configService, this.storageService);
       await fileService.createPromptFile();
     } catch (error) {
-      vscode.window.showErrorMessage(`新建 Prompt 文件失败: ${error instanceof Error ? error.message : String(error)}`);
+      void vscode.window.showErrorMessage(
+        `新建 Prompt 文件失败：${error instanceof Error ? error.message : String(error)}`
+      );
     }
   }
 
-  /** 搜索 Prompt（fuse.js 模糊搜索） */
+  /** 搜索 Prompt（fuse.js 模糊搜索，支持选区作为初始查询） */
   private async searchPrompt(): Promise<void> {
     const prompts = this.storageService.list();
     if (!prompts.length) {
-      vscode.window.showInformationMessage('暂无 Prompt');
+      void vscode.window.showInformationMessage('暂无 Prompt。');
       return;
     }
-    const input = await vscode.window.showInputBox({ placeHolder: '输入关键词进行模糊搜索（回车查看结果）' });
+
+    // 优先使用当前编辑器选中的文本作为搜索词
+    let query: string | undefined;
+    const editor = vscode.window.activeTextEditor;
+    const selection = editor?.selection;
+    if (editor && selection && !selection.isEmpty) {
+      const selectedText = editor.document.getText(selection).trim();
+      if (selectedText) {
+        query = selectedText;
+      }
+    }
+
+    // 没有选区或选区为空时，弹出输入框
+    if (!query) {
+      const input = await vscode.window.showInputBox({
+        placeHolder: '输入关键字进行模糊搜索，留空回车查看全部 Prompt',
+      });
+      if (input === undefined) {
+        return;
+      }
+      query = input.trim();
+    }
+
     const fuse = new Fuse(prompts, {
       includeScore: true,
       threshold: 0.4,
@@ -139,14 +227,20 @@ export class CommandRegistrar {
         { name: 'tags', weight: 0.1 },
       ],
     });
-    const results = input ? fuse.search(input) : prompts.map((p) => ({ item: p } as any));
+
+    const results = query ? fuse.search(query) : prompts.map((p) => ({ item: p } as any));
     const items = results.slice(0, 50).map((r: any) => ({
-      label: `${r.item.emoji || '📝'} ${r.item.name}`,
+      label: `${r.item.emoji || '📌'} ${r.item.name}`,
       description: r.item.content.substring(0, 80),
       prompt: r.item as Prompt,
     }));
-    const picked = await vscode.window.showQuickPick(items, { placeHolder: '选择要复制的 Prompt' });
-    if (picked) await this.copyPromptContent(picked.prompt);
+
+    const picked = await vscode.window.showQuickPick(items, {
+      placeHolder: '选择要复制的 Prompt',
+    });
+    if (picked) {
+      await this.copyPromptContent(picked.prompt);
+    }
   }
 
   /** 复制 Prompt 内容 */
@@ -154,22 +248,20 @@ export class CommandRegistrar {
     let prompt: Prompt | undefined;
 
     if (context) {
-      // 如果 context 已经是 Prompt 对象
       if (context.id && context.name && context.content) {
         prompt = context as Prompt;
       } else if ((context as any).prompt) {
-        // 如果 context 有 prompt 属性（来自 PromptTreeItem）
-        prompt = (context as any).prompt;
+        prompt = (context as any).prompt as Prompt;
       }
     }
 
     if (!prompt) {
-      vscode.window.showErrorMessage('无法确定要复制的 Prompt');
+      void vscode.window.showErrorMessage('无法确定要复制的 Prompt。');
       return;
     }
 
     await vscode.env.clipboard.writeText(prompt.content);
-    // 记录使用次数
+
     const usage = new UsageLogService(this.configService);
     await usage.record({
       id: generateId(),
@@ -178,42 +270,29 @@ export class CommandRegistrar {
       promptId: prompt.id,
       status: 'success',
     });
-    vscode.window.showInformationMessage(`已复制 "${prompt.name}"`);
+
+    void vscode.window.showInformationMessage(`已复制 Prompt「${prompt.name}」内容。`);
   }
 
-  /** 编辑 Prompt */
+  /** 编辑 Prompt：打开源 Markdown 文件 */
   private async editPrompt(context?: any): Promise<void> {
-    let prompt: Prompt | undefined;
-
-    if (context) {
-      // 如果 context 已经是 Prompt 对象
-      if (context.id && context.name) {
-        prompt = context as Prompt;
-      } else if ((context as any).prompt) {
-        // 如果 context 有 prompt 属性（来自 PromptTreeItem）
-        prompt = (context as any).prompt;
-      }
-    }
-
-    if (!prompt) {
-      vscode.window.showErrorMessage('无法确定要编辑的 Prompt');
-      return;
-    }
+    const prompt = await this.ensurePromptSelected(context);
+    if (!prompt) return;
 
     if (!prompt.sourceFile) {
-      vscode.window.showWarningMessage('此 Prompt 没有关联的源文件');
+      void vscode.window.showWarningMessage('该 Prompt 没有关联的源文件。');
       return;
     }
 
-    // 打开源文件进行编辑
     const doc = await vscode.workspace.openTextDocument(prompt.sourceFile);
     await vscode.window.showTextDocument(doc, { preview: false });
   }
 
-  /** 刷新视图 */
+  /** 刷新 TreeView 与存储 */
   private async refreshView(): Promise<void> {
     await this.storageService.refresh();
-    vscode.window.showInformationMessage('视图已刷新');
+    this.treeProvider.refresh();
+    void vscode.window.showInformationMessage('Prompt 列表已刷新。');
   }
 
   /** 打开设置 */
@@ -221,169 +300,167 @@ export class CommandRegistrar {
     this.configService.openSettings();
   }
 
-  /** 打开本地 Prompt 仓库文件夹 */
+  /** 打开 Prompt 存储目录 */
   private async openStorageFolder(): Promise<void> {
-    const storagePath = this.configService.get<string>('storagePath', '~/.prompt-hub');
-    const resolvedPath = this.resolvePath(storagePath);
-
-    // storagePath 本身就是存储目录，直接使用
-    // 使用 vscode.openExternal 直接打开文件夹（而不是高亮选中）
-    const uri = vscode.Uri.file(resolvedPath);
+    const storagePath = this.configService.getStoragePath();
+    const uri = vscode.Uri.file(storagePath);
     await vscode.env.openExternal(uri);
   }
 
-  /** 解析路径（支持 ~ 和 ${workspaceFolder} 等变量） */
-  private resolvePath(configPath: string): string {
-    let resolved = configPath;
-
-    // 替换 ~
-    if (resolved.startsWith('~')) {
-      resolved = resolved.replace('~', os.homedir());
-    }
-
-    // 替换 ${workspaceFolder}
-    if (resolved.includes('${workspaceFolder}')) {
-      const workspaceFolder = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
-      if (workspaceFolder) {
-        resolved = resolved.replace('${workspaceFolder}', workspaceFolder);
-      }
-    }
-
-    return resolved;
-  }
-
-  /** 启动引导 */
+  /** 启动配置向导 */
   private async startOnboarding(): Promise<void> {
-    const wizard = new OnboardingWizard(this.context);
+    const wizard = new OnboardingWizard(this.context, this.configService);
     await wizard.start();
   }
 
-  /** 重置引导 */
+  /** 重置配置向导 */
   private async resetOnboarding(): Promise<void> {
-    const wizard = new OnboardingWizard(this.context);
+    const wizard = new OnboardingWizard(this.context, this.configService);
     await wizard.reset();
   }
 
-  /** 删除 Prompt（右键菜单） */
+  /** 删除 Prompt */
   private async deletePrompt(context?: any): Promise<void> {
-    console.log('[CommandRegistrar] deletePrompt called with context:', context);
-    console.log('[CommandRegistrar] context type:', typeof context);
-    if (context) {
-      console.log('[CommandRegistrar] context keys:', Object.keys(context));
-      if ((context as any).prompt) {
-        console.log('[CommandRegistrar] found prompt in context.prompt:', (context as any).prompt);
-      }
-    }
+    const prompt = await this.ensurePromptSelected(context);
+    if (!prompt) return;
 
-    // 从树视图右键菜单调用时，VSCode 会传递树节点或其他上下文
-    // 我们需要从上下文中提取 Prompt 对象
-    let prompt: Prompt | undefined;
-
-    if (context) {
-      // 如果 context 已经是 Prompt 对象
-      if (context.id && context.name) {
-        prompt = context as Prompt;
-      } else if ((context as any).prompt) {
-        // 如果 context 有 prompt 属性（来自 PromptTreeItem）
-        prompt = (context as any).prompt;
-      }
-    }
-
-    if (!prompt) {
-      console.error('[CommandRegistrar] 无法确定要删除的 Prompt，context:', context);
-      vscode.window.showErrorMessage('无法确定要删除的 Prompt');
-      return;
-    }
-
-    const answer = await vscode.window.showWarningMessage(
-      `确认删除 Prompt：${prompt.name}？此操作不可撤销。`,
+    const confirmed = await vscode.window.showWarningMessage(
+      `确定要删除 Prompt「${prompt.name}」吗？该操作不可撤销。`,
       { modal: true },
       '删除',
       '取消'
     );
-    if (answer !== '删除') return;
+    if (confirmed !== '删除') return;
+
     await this.storageService.remove(prompt.id);
-    vscode.window.showInformationMessage(`已删除 Prompt：${prompt.name}`);
     this.treeProvider.refresh();
+    void vscode.window.showInformationMessage(`已删除 Prompt「${prompt.name}」。`);
   }
 
-  /** AI 生成标题/emoji */
-  private async aiGenerateMeta(prompt?: Prompt): Promise<void> {
-    const p = await this.ensurePromptSelected(prompt);
-    if (!p) return;
-    const ai = new AIService(this.configService);
-    const usage = new UsageLogService(this.configService);
-    const start = Date.now();
-    const meta = await ai.generateMeta(p.content);
-    const durationMs = Date.now() - start;
-    if (!meta.name && !meta.emoji) return;
-    if (p.sourceFile) {
-      await this.updateMarkdownHeader(p.sourceFile, meta.name || p.name, meta.emoji || p.emoji);
-    } else {
-      p.name = meta.name || p.name;
-      p.emoji = meta.emoji || p.emoji;
-      p.updatedAt = new Date().toISOString();
-      await this.storageService.update(p);
-    }
-    await usage.record({ id: generateId(), timestamp: new Date().toISOString(), operation: 'meta', promptId: p.id, status: 'success', durationMs });
-    this.treeProvider.refresh();
-    vscode.window.showInformationMessage(`已更新标题：${meta.emoji || ''} ${meta.name || p.name}`.trim());
-  }
+  /** TreeView 单击/双击处理：单击复制，双击编辑 */
+  private lastClickInfo: { id?: string; time?: number } = {};
+  private async onPromptTreeItemClick(prompt?: Prompt): Promise<void> {
+    if (!prompt) return;
 
-  /** AI 优化内容 */
-  private async aiOptimize(prompt?: Prompt): Promise<void> {
-    const p = await this.ensurePromptSelected(prompt);
-    if (!p) return;
-    const ai = new AIService(this.configService);
-    const usage = new UsageLogService(this.configService);
-    const start = Date.now();
-    const optimized = await ai.optimize(p.content);
-    const durationMs = Date.now() - start;
-    if (!optimized || optimized === p.content) {
-      vscode.window.showInformationMessage('AI 优化没有变化');
+    const now = Date.now();
+    const isSame = this.lastClickInfo.id === prompt.id;
+    const withinDoubleClick = isSame && this.lastClickInfo.time && now - this.lastClickInfo.time < 350;
+
+    this.lastClickInfo = { id: prompt.id, time: now };
+
+    if (withinDoubleClick) {
+      // 双击：打开编辑
+      await this.editPrompt(prompt);
       return;
     }
-    if (p.sourceFile) {
-      await this.replaceMarkdownBody(p.sourceFile, optimized);
-    } else {
-      p.content = optimized;
-      p.updatedAt = new Date().toISOString();
-      await this.storageService.update(p);
+
+    // 单击：复制内容
+    await this.copyPromptContent(prompt);
+  }
+
+  /** AI 生成标题 / emoji */
+  private async aiGenerateMeta(prompt?: Prompt): Promise<void> {
+    const target = await this.ensurePromptSelected(prompt);
+    if (!target) return;
+
+    const ai = new AIService(this.configService);
+    const meta = await ai.generateMeta(target.content);
+
+    if (!meta.name && !meta.emoji) {
+      void vscode.window.showInformationMessage('AI 未返回可用的标题或 emoji。');
+      return;
     }
-    await usage.record({ id: generateId(), timestamp: new Date().toISOString(), operation: 'optimize', promptId: p.id, status: 'success', durationMs });
+
+    const updated: Prompt = {
+      ...target,
+      name: meta.name || target.name,
+      emoji: meta.emoji ?? target.emoji,
+      updatedAt: new Date().toISOString(),
+    };
+
+    await this.storageService.update(updated);
     this.treeProvider.refresh();
-    vscode.window.showInformationMessage(`已优化 Prompt：${p.name}`);
+
+    if (updated.sourceFile) {
+      await this.updateMarkdownHeader(updated.sourceFile, updated.name, updated.emoji);
+    }
+
+    void vscode.window.showInformationMessage(`已更新 Prompt 元信息：「${updated.name}」。`);
+  }
+
+  /** AI 优化 Prompt 内容 */
+  private async aiOptimize(prompt?: Prompt): Promise<void> {
+    const target = await this.ensurePromptSelected(prompt);
+    if (!target) return;
+
+    const ai = new AIService(this.configService);
+    const optimized = await ai.optimize(target.content);
+
+    if (!optimized || optimized.trim() === target.content.trim()) {
+      void vscode.window.showInformationMessage('AI 优化未产生变化。');
+      return;
+    }
+
+    const updated: Prompt = {
+      ...target,
+      content: optimized,
+      updatedAt: new Date().toISOString(),
+    };
+
+    await this.storageService.update(updated);
+    this.treeProvider.refresh();
+
+    if (updated.sourceFile) {
+      await this.replaceMarkdownBody(updated.sourceFile, optimized);
+    }
+
+    const usage = new UsageLogService(this.configService);
+    await usage.record({
+      id: generateId(),
+      timestamp: new Date().toISOString(),
+      operation: 'optimize',
+      promptId: updated.id,
+      status: 'success',
+    });
+
+    void vscode.window.showInformationMessage(`已优化 Prompt「${updated.name}」。`);
   }
 
   /** Git 同步 */
   private async gitSync(): Promise<void> {
     const git = new GitSyncService(this.configService);
-    await vscode.window.withProgress({ location: vscode.ProgressLocation.Notification, title: 'Prompt Hub: Git 同步中' }, async () => {
-      await git.sync();
-    });
-    vscode.window.showInformationMessage('Git 同步完成');
+    await vscode.window.withProgress(
+      {
+        location: vscode.ProgressLocation.Notification,
+        title: 'Prompt Hub: 正在执行 Git 同步...',
+      },
+      async () => {
+        await git.sync();
+      }
+    );
+    void vscode.window.showInformationMessage('Prompt Hub: Git 同步完成。');
   }
 
-  /** 显示快速访问菜单 */
+  /** 快速操作菜单（状态栏 / TreeView 顶部调用） */
   private async showQuickPick(): Promise<void> {
-    const items = [
+    const items: Array<{ label: string; description: string; action: string }> = [
       {
         label: '📝 新建 Prompt',
-        description: '创建新的 Prompt 文件',
+        description: '创建一个新的 Prompt 文件',
         action: 'new',
       },
       {
         label: '🔍 搜索 Prompt',
-        description: '搜索并复制 Prompt',
+        description: '在所有 Prompt 中进行模糊搜索',
         action: 'search',
       },
       {
         label: '✂️ 从选区创建',
-        description: '从当前选中的文本创建 Prompt',
+        description: '将当前选中的文本保存为 Prompt',
         action: 'fromSelection',
       },
       {
-        label: '🔄 刷新视图',
+        label: '🔄 刷新列表',
         description: '重新加载 Prompt 列表',
         action: 'refresh',
       },
@@ -394,20 +471,19 @@ export class CommandRegistrar {
       },
       {
         label: '🎯 配置向导',
-        description: '启动 Prompt Hub 配置向导',
+        description: '重新运行 Prompt Hub 配置向导',
         action: 'onboarding',
       },
       {
         label: '⚙️ 打开设置',
-        description: '配置 Prompt Hub',
+        description: '打开 Prompt Hub 设置页',
         action: 'settings',
       },
     ];
 
     const picked = await vscode.window.showQuickPick(items, {
-      placeHolder: '选择要执行的操作',
+      placeHolder: '选择要执行的 Prompt Hub 操作',
     });
-
     if (!picked) return;
 
     switch (picked.action) {
@@ -432,50 +508,698 @@ export class CommandRegistrar {
       case 'settings':
         this.openSettings();
         break;
+      default:
+        break;
     }
   }
 
-  /** 若未传入 Prompt，则让用户选择 */
-  private async ensurePromptSelected(prompt?: Prompt): Promise<Prompt | undefined> {
+  /** 确保有一个 Prompt 被选中，没有传入时弹出列表让用户选择 */
+  private async ensurePromptSelected(input?: Prompt | { prompt?: Prompt }): Promise<Prompt | undefined> {
+    const prompt = (input as any)?.prompt ? (input as any).prompt as Prompt : (input as Prompt | undefined);
     if (prompt) return prompt;
+
     const list = this.storageService.list();
     if (!list.length) {
-      vscode.window.showInformationMessage('暂无 Prompt');
+      void vscode.window.showInformationMessage('暂无 Prompt。');
       return undefined;
     }
+
     const picked = await vscode.window.showQuickPick(
-      list.map((p) => ({ label: `${p.emoji || '📝'} ${p.name}`, description: p.content.substring(0, 60), prompt: p })),
-      { placeHolder: '选择一个 Prompt' }
+      list.map((p) => ({
+        label: `${p.emoji || '📌'} ${p.name}`,
+        description: p.content.substring(0, 60),
+        prompt: p,
+      })),
+      { placeHolder: '请选择一个 Prompt' }
     );
+
     return picked?.prompt;
   }
 
-  /** 修改 Markdown 头部（# prompt: ...） */
-  private async updateMarkdownHeader(file: string, name: string, emoji?: string): Promise<void> {
+  /** 更新 Markdown 文件的标题行（# ...） */
+  private async updateMarkdownHeader(
+    file: string,
+    name: string,
+    emoji?: string
+  ): Promise<void> {
     const uri = vscode.Uri.file(file);
     const doc = await vscode.workspace.openTextDocument(uri);
     const edit = new vscode.WorkspaceEdit();
-    const firstLine = doc.lineAt(0);
-    const newHeader = `# prompt: ${emoji ? emoji + ' ' : ''}${name}`;
-    edit.replace(uri, new vscode.Range(firstLine.range.start, firstLine.range.end), newHeader);
+
+    const lines = doc.getText().split('\n');
+    let headerLineIndex = -1;
+    for (let i = 0; i < lines.length; i += 1) {
+      if (lines[i].trim().startsWith('#')) {
+        headerLineIndex = i;
+        break;
+      }
+    }
+
+    if (headerLineIndex === -1) {
+      // 如果没有标题行，在 frontmatter 后追加一行
+      headerLineIndex = 0;
+      if (lines[0]?.trim() === '---') {
+        const second = lines.findIndex((l, idx) => idx > 0 && l.trim() === '---');
+        headerLineIndex = second >= 0 ? second + 1 : lines.length;
+      }
+    }
+
+    const newHeader = `# ${emoji ? `${emoji} ` : ''}${name}`;
+    const line = doc.lineAt(headerLineIndex);
+    edit.replace(uri, line.range, newHeader);
     await vscode.workspace.applyEdit(edit);
     await doc.save();
   }
 
-  /** 替换 Markdown 正文（保留第一行 header 与尾部 ID 注释） */
+  /** 替换 Markdown 正文内容（保留 frontmatter 和标题行） */
   private async replaceMarkdownBody(file: string, newBody: string): Promise<void> {
     const uri = vscode.Uri.file(file);
     const doc = await vscode.workspace.openTextDocument(uri);
     const edit = new vscode.WorkspaceEdit();
+
     const lines = doc.getText().split('\n');
-    let idLineIndex = lines.findIndex((l: string) => /<!--\s*PromptHub:id=/.test(l));
-    if (idLineIndex < 0) idLineIndex = lines.length; // 没有则认为在末尾
-    const startPos = new vscode.Position(1, 0); // 从第二行开始
-    const endPos = new vscode.Position(idLineIndex, 0);
+
+    let bodyStartLine = 0;
+
+    // 跳过 frontmatter（--- ... ---）
+    if (lines[0]?.trim() === '---') {
+      const second = lines.findIndex((l, idx) => idx > 0 && l.trim() === '---');
+      if (second >= 0) {
+        bodyStartLine = second + 1;
+      }
+    }
+
+    // 再跳过一行标题（# ...）
+    for (let i = bodyStartLine; i < lines.length; i += 1) {
+      if (lines[i].trim().startsWith('#')) {
+        bodyStartLine = i + 1;
+        break;
+      }
+    }
+
+    const startPos = new vscode.Position(bodyStartLine, 0);
+    const endPos = new vscode.Position(doc.lineCount, 0);
     const range = new vscode.Range(startPos, endPos);
+
     const text = `\n${newBody.trim()}\n`;
     edit.replace(uri, range, text);
     await vscode.workspace.applyEdit(edit);
     await doc.save();
   }
+
+  /** 简单的 CLI 调用 Demo：执行一条 echo 命令并展示结果 */
+  // private async cliDemo(): Promise<void> {
+  //   const command =
+  //     process.platform === 'win32' ? 'echo Prompt Hub CLI demo' : 'echo Prompt Hub CLI demo';
+
+  //   try {
+  //     const { stdout, stderr } = await this.exec(command);
+  //     const output = [
+  //       `命令: ${command}`,
+  //       `stdout: ${stdout.trim() || '(空)'}`,
+  //       stderr.trim() ? `stderr: ${stderr.trim()}` : '',
+  //     ]
+  //       .filter(Boolean)
+  //       .join('\n');
+
+  //     void vscode.window.showInformationMessage(output, { modal: true });
+  //   } catch (error) {
+  //     void vscode.window.showErrorMessage(
+  //       `CLI 调用 Demo 失败：${
+  //         error instanceof Error ? error.message : String(error)
+  //       }`
+  //     );
+  //   }
+  // }
+
+    /** 简单的 CLI 调用 Demo：执行本地 AI CLI 并展示结果 */
+  private async cliDemo(): Promise<void> {
+    // 从配置读取要执行的命令：promptHub.cliDemo.command
+    const command = this.configService.get<string>('cliDemo.command', '').trim();
+
+    console.log('[PromptHub][cliDemo] 使用命令:', command);
+
+    if (!command) {
+      void vscode.window.showWarningMessage(
+        '尚未配置 CLI Demo 命令，请在设置中搜索 "Prompt Hub: CLI Demo" 并填写要执行的命令行。'
+      );
+      return;
+    }
+
+    try {
+      // 设置 Claude CLI 所需的环境变量
+      const env = {
+        ...process.env,
+        ANTHROPIC_AUTH_TOKEN: 'sk_3eb56bdff5b7ef0d39976039db7bbe6789bbe5451b9bd4bb549c087b00077ba9',
+        ANTHROPIC_BASE_URL: 'http://www.claudecodeserver.top/api'
+      };
+
+      console.log('[PromptHub][cliDemo] 设置环境变量:', {
+        ANTHROPIC_AUTH_TOKEN: env.ANTHROPIC_AUTH_TOKEN ? env.ANTHROPIC_AUTH_TOKEN  : '未设置',
+        ANTHROPIC_BASE_URL: env.ANTHROPIC_BASE_URL
+      });
+
+      console.log('[PromptHub][cliDemo] 开始执行命令...');
+      const startTime = Date.now();
+
+      // 使用带环境变量的 exec 执行命令，设置30秒超时
+      const { stdout, stderr } = await this.execWithEnv(command, env, 30000);
+
+      const executionTime = Date.now() - startTime;
+      console.log(`[PromptHub][cliDemo] 命令执行完成，耗时: ${executionTime}ms`);
+      const output = [
+        `命令: ${command}`,
+        `环境变量: ANTHROPIC_AUTH_TOKEN=***, ANTHROPIC_BASE_URL=${env.ANTHROPIC_BASE_URL}`,
+        `stdout: ${stdout.trim() || '(空)'}`,
+        stderr.trim() ? `stderr: ${stderr.trim()}` : '',
+      ]
+        .filter(Boolean)
+        .join('\n');
+
+      console.log('[PromptHub][cliDemo] 输出:', output);
+      void vscode.window.showInformationMessage(output, { modal: true });
+    } catch (error) {
+      console.error('[PromptHub][cliDemo] 调用失败:', error);
+      void vscode.window.showErrorMessage(
+        `CLI 调用 Demo 失败：${
+          error instanceof Error ? error.message : String(error)
+        }`
+      );
+    }
+  }
+
+  /**
+   * 批量为所有 Prompt 生成 emoji 和 Name
+   *
+   * 流程：
+   * 1. 检查是否有需要生成的 Prompt
+   * 2. 用户确认（可能产生 API 费用）
+   * 3. 显示进度条，逐个调用 AI
+   * 4. 更新存储
+   * 5. 显示统计结果
+   */
+  private async batchGenerateMeta(): Promise<void> {
+    try {
+      // 1. 获取所有 Prompt
+      const prompts = this.storageService.list();
+      if (!prompts.length) {
+        void vscode.window.showInformationMessage('暂无 Prompt。');
+        return;
+      }
+
+      // 2. 筛选需要生成的 Prompt（没有 emoji 或名称不规范的）
+      const needsGeneration = prompts.filter((p) =>
+        !p.emoji ||
+        p.emoji === '📝' ||
+        !p.name ||
+        p.name === '未命名'
+      );
+
+      if (!needsGeneration.length) {
+        void vscode.window.showInformationMessage(
+          '所有 Prompt 都已有有效的 Name 和 Emoji。'
+        );
+        return;
+      }
+
+      // 3. 估算费用并确认
+      const estimatedCost = await this.estimateBatchCost(needsGeneration.length);
+      const message = estimatedCost > 0
+        ? `将为 ${needsGeneration.length} 个 Prompt 生成 emoji 和 Name，预估费用 $${estimatedCost.toFixed(2)}。继续吗？`
+        : `将为 ${needsGeneration.length} 个 Prompt 生成 emoji 和 Name。继续吗？`;
+
+      const confirm = await vscode.window.showWarningMessage(
+        message,
+        { modal: true },
+        '继续',
+        '取消'
+      );
+
+      if (confirm !== '继续') {
+        return;
+      }
+
+      // 4. 创建 AI 服务实例
+      const ai = new AIService(this.configService);
+      let successCount = 0;
+      let failureCount = 0;
+      const failedPrompts: string[] = [];
+
+      // 5. 显示进度条，逐个处理
+      await vscode.window.withProgress(
+        {
+          location: vscode.ProgressLocation.Notification,
+          title: `正在为 ${needsGeneration.length} 个 Prompt 生成元信息...`,
+          cancellable: true,
+        },
+        async (progress, token) => {
+          for (let i = 0; i < needsGeneration.length; i++) {
+            // 检查用户是否取消
+            if (token.isCancellationRequested) {
+              vscode.window.showWarningMessage('批量生成已取消。');
+              break;
+            }
+
+            const prompt = needsGeneration[i];
+
+            try {
+              // 调用 AI 生成元信息
+              const meta = await ai.generateMeta(prompt.content);
+
+              // 更新 Prompt
+              const updated: Prompt = {
+                ...prompt,
+                name: meta.name || prompt.name || `Prompt_${i}`,
+                emoji: meta.emoji ?? prompt.emoji,
+                updatedAt: new Date().toISOString(),
+                aiGeneratedMeta: true, // 标记为 AI 生成
+              };
+
+              // 保存到存储
+              await this.storageService.update(updated);
+              successCount++;
+            } catch (error) {
+              failureCount++;
+              failedPrompts.push(prompt.name || `Prompt_${i}`);
+              console.error(
+                `处理 Prompt "${prompt.name}" 失败:`,
+                error instanceof Error ? error.message : String(error)
+              );
+            }
+
+            // 更新进度
+            const percentage = ((i + 1) / needsGeneration.length) * 100;
+            progress.report({
+              increment: 100 / needsGeneration.length,
+              message: `已处理 ${i + 1}/${needsGeneration.length} (${Math.round(percentage)}%)`,
+            });
+
+            // 避免 API 速率限制，添加延迟
+            // 可通过配置 promptHub.ai.batchDelayMs 调整
+            const delayMs = this.configService.get<number>('ai.batchDelayMs', 500);
+            await this.delay(delayMs);
+          }
+        }
+      );
+
+      // 6. 刷新树视图
+      this.treeProvider.refresh();
+
+      // 7. 显示结果统计
+      let message_result = `批量生成完成！\n✅ 成功：${successCount} 个\n❌ 失败：${failureCount} 个`;
+      if (failedPrompts.length > 0 && failedPrompts.length <= 5) {
+        message_result += `\n\n失败的 Prompt：\n${failedPrompts.map(p => `  • ${p}`).join('\n')}`;
+      }
+
+      void vscode.window.showInformationMessage(message_result, { modal: false });
+    } catch (error) {
+      void vscode.window.showErrorMessage(
+        `批量生成失败：${error instanceof Error ? error.message : String(error)}`
+      );
+    }
+  }
+
+  /**
+   * 批量为选中的 Prompt 生成 emoji 和 Name
+   *
+   * 用户可以多选需要生成的 Prompt，避免处理所有 Prompt
+   */
+  private async batchGenerateMetaSelected(): Promise<void> {
+    try {
+      const prompts = this.storageService.list();
+
+      if (!prompts.length) {
+        void vscode.window.showInformationMessage('暂无 Prompt。');
+        return;
+      }
+
+      // 筛选需要生成的 Prompt
+      const needsGeneration = prompts.filter(
+        (p) => !p.emoji || p.emoji === '📝' || !p.name || p.name === '未命名'
+      );
+
+      if (!needsGeneration.length) {
+        void vscode.window.showInformationMessage(
+          '所有 Prompt 都已有有效的 Name 和 Emoji。'
+        );
+        return;
+      }
+
+      // 用户多选
+      const selectedItems = await vscode.window.showQuickPick(
+        needsGeneration.map((p) => ({
+          label: p.emoji ? `${p.emoji} ${p.name}` : `📝 ${p.name}`,
+          description: p.id,
+          picked: true, // 默认全选
+        })),
+        {
+          placeHolder: '选择要生成 emoji 的 Prompt（多选）',
+          canPickMany: true,
+          matchOnDescription: true,
+        }
+      );
+
+      if (!selectedItems || !selectedItems.length) {
+        return;
+      }
+
+      const selectedIds = selectedItems.map((item) => item.description!);
+      const selectedPrompts = needsGeneration.filter((p) =>
+        selectedIds.includes(p.id)
+      );
+
+      // 确认操作
+      const estimatedCost = await this.estimateBatchCost(selectedPrompts.length);
+      const message = estimatedCost > 0
+        ? `将为 ${selectedPrompts.length} 个 Prompt 生成 emoji 和 Name，预估费用 $${estimatedCost.toFixed(2)}。继续吗？`
+        : `将为 ${selectedPrompts.length} 个 Prompt 生成 emoji 和 Name。继续吗？`;
+
+      const confirm = await vscode.window.showWarningMessage(
+        message,
+        { modal: true },
+        '继续',
+        '取消'
+      );
+
+      if (confirm !== '继续') {
+        return;
+      }
+
+      // 批量处理（同 batchGenerateMeta）
+      const ai = new AIService(this.configService);
+      let successCount = 0;
+      let failureCount = 0;
+
+      await vscode.window.withProgress(
+        {
+          location: vscode.ProgressLocation.Notification,
+          title: `正在处理 ${selectedPrompts.length} 个 Prompt...`,
+          cancellable: true,
+        },
+        async (progress, token) => {
+          for (let i = 0; i < selectedPrompts.length; i++) {
+            if (token.isCancellationRequested) {
+              break;
+            }
+
+            const prompt = selectedPrompts[i];
+
+            try {
+              const meta = await ai.generateMeta(prompt.content);
+              const updated: Prompt = {
+                ...prompt,
+                name: meta.name || prompt.name || `Prompt_${i}`,
+                emoji: meta.emoji ?? prompt.emoji,
+                updatedAt: new Date().toISOString(),
+                aiGeneratedMeta: true,
+              };
+              await this.storageService.update(updated);
+              successCount++;
+            } catch (error) {
+              failureCount++;
+              console.error(`处理 Prompt "${prompt.name}" 失败:`, error);
+            }
+
+            progress.report({
+              increment: 100 / selectedPrompts.length,
+              message: `已处理 ${i + 1}/${selectedPrompts.length}`,
+            });
+
+            const delayMs = this.configService.get<number>('ai.batchDelayMs', 500);
+            await this.delay(delayMs);
+          }
+        }
+      );
+
+      this.treeProvider.refresh();
+
+      void vscode.window.showInformationMessage(
+        `处理完成！✅ 成功：${successCount} 个\n❌ 失败：${failureCount} 个`
+      );
+    } catch (error) {
+      void vscode.window.showErrorMessage(
+        `批量生成失败：${error instanceof Error ? error.message : String(error)}`
+      );
+    }
+  }
+
+  /**
+   * 估算批量生成的费用
+   *
+   * 不同的 AI 提供商有不同的价格
+   * 此方法返回估算的总成本（美元）
+   */
+  private async estimateBatchCost(count: number): Promise<number> {
+    const provider = this.configService.get<string>('ai.provider', 'openai');
+
+    // 各提供商的单次 API 调用成本（估算）
+    const costPerCall: Record<string, number> = {
+      'openai': 0.001,      // GPT-4o，约 1 毫美元
+      'azure': 0.001,       // 同 OpenAI
+      'gemini': 0,          // 免费配额内免费
+      'deepseek': 0.00005,  // 非常便宜，约 0.05 毫美元
+      'qwen': 0.00005,      // 通义千问，成本优化
+      'custom': 0,          // 自定义 API，假设免费
+    };
+
+    const costPerCallValue = costPerCall[provider] || 0;
+    return costPerCallValue * count;
+  }
+
+  /**
+   * 延迟工具函数
+   * 用于实现 API 调用之间的延迟，避免速率限制
+   */
+  private delay(ms: number): Promise<void> {
+    return new Promise((resolve) => setTimeout(resolve, ms));
+  }
+
+  /**
+   * 优化单个 Prompt 的唤醒词（emoji 和 name）
+   *
+   * 当用户在树视图中选择单个 Prompt 时，点击 ✨ 按钮触发
+   * 直接执行优化，无需确认对话
+   */
+  private async optimizeMeta(context?: any): Promise<void> {
+    try {
+      const prompt = context?.prompt;
+      if (!prompt) {
+        void vscode.window.showWarningMessage('未能获取 Prompt 信息。');
+        return;
+      }
+
+      // 创建 AI 服务实例
+      const ai = new AIService(this.configService);
+
+      // 显示进度条
+      await vscode.window.withProgress(
+        {
+          location: vscode.ProgressLocation.Notification,
+          title: `正在优化 "${prompt.name}" 的唤醒词...`,
+          cancellable: false,
+        },
+        async () => {
+          try {
+            // 调用 AI 生成元信息
+            const meta = await ai.generateMeta(prompt.content);
+
+            // 更新 Prompt
+            const updated: Prompt = {
+              ...prompt,
+              name: meta.name || prompt.name,
+              emoji: meta.emoji ?? prompt.emoji,
+              updatedAt: new Date().toISOString(),
+              aiGeneratedMeta: true,
+            };
+
+            // 保存到存储
+            await this.storageService.update(updated);
+
+            // 刷新树视图
+            this.treeProvider.refresh();
+
+            // 显示成功提示
+            void vscode.window.showInformationMessage(
+              `✅ 已优化 "${updated.name}" 的唤醒词`
+            );
+          } catch (error) {
+            void vscode.window.showErrorMessage(
+              `优化失败：${error instanceof Error ? error.message : String(error)}`
+            );
+            console.error('优化 Prompt 失败:', error);
+          }
+        }
+      );
+    } catch (error) {
+      void vscode.window.showErrorMessage(
+        `优化失败：${error instanceof Error ? error.message : String(error)}`
+      );
+    }
+  }
+
+  /**
+   * 批量优化选中的多个 Prompt 的唤醒词
+   *
+   * 当用户在树视图中多选 Prompt 时，工具栏显示 ✨批量优化唤醒词 按钮
+   * 点击后弹出确认对话，用户确认后批量处理
+   */
+  private async batchOptimizeMeta(): Promise<void> {
+    try {
+      // 获取树视图的选择
+      if (!this.treeView) {
+        void vscode.window.showWarningMessage('树视图未初始化。');
+        return;
+      }
+
+      const selectedItems = this.treeView.selection || [];
+      if (!selectedItems.length) {
+        void vscode.window.showWarningMessage('请选择要优化的 Prompt。');
+        return;
+      }
+
+      // 提取 Prompt 对象（从树视图项中获取）
+      const selectedPrompts: Prompt[] = [];
+      for (const item of selectedItems) {
+        // 检查是否是 PromptTreeItem（拥有 prompt 属性）
+        const promptItem = item as any;
+        if (promptItem.prompt) {
+          selectedPrompts.push(promptItem.prompt);
+        }
+      }
+
+      if (!selectedPrompts.length) {
+        void vscode.window.showWarningMessage('未能获取选中的 Prompt。');
+        return;
+      }
+
+      // 显示确认对话
+      const confirmed = await vscode.window.showWarningMessage(
+        `即将优化 ${selectedPrompts.length} 个 Prompt 的唤醒词，是否继续？`,
+        { modal: true },
+        '继续',
+        '取消'
+      );
+
+      if (confirmed !== '继续') {
+        return;
+      }
+
+      // 创建 AI 服务实例
+      const ai = new AIService(this.configService);
+      let successCount = 0;
+      let failureCount = 0;
+      const failedPrompts: string[] = [];
+
+      // 显示进度条，逐个处理
+      await vscode.window.withProgress(
+        {
+          location: vscode.ProgressLocation.Notification,
+          title: `正在优化 ${selectedPrompts.length} 个 Prompt 的唤醒词...`,
+          cancellable: true,
+        },
+        async (progress, token) => {
+          for (let i = 0; i < selectedPrompts.length; i++) {
+            // 检查用户是否取消
+            if (token.isCancellationRequested) {
+              void vscode.window.showWarningMessage('优化已取消。');
+              break;
+            }
+
+            const prompt = selectedPrompts[i];
+
+            try {
+              // 调用 AI 生成元信息
+              const meta = await ai.generateMeta(prompt.content);
+
+              // 更新 Prompt
+              const updated: Prompt = {
+                ...prompt,
+                name: meta.name || prompt.name,
+                emoji: meta.emoji ?? prompt.emoji,
+                updatedAt: new Date().toISOString(),
+                aiGeneratedMeta: true,
+              };
+
+              // 保存到存储
+              await this.storageService.update(updated);
+              successCount++;
+            } catch (error) {
+              failureCount++;
+              failedPrompts.push(prompt.name || `Prompt_${i}`);
+              console.error(
+                `优化 Prompt "${prompt.name}" 失败:`,
+                error instanceof Error ? error.message : String(error)
+              );
+            }
+
+            // 更新进度
+            const percentage = ((i + 1) / selectedPrompts.length) * 100;
+            progress.report({
+              increment: 100 / selectedPrompts.length,
+              message: `已处理 ${i + 1}/${selectedPrompts.length} (${Math.round(percentage)}%)`,
+            });
+
+            // 避免 API 速率限制，添加延迟
+            const delayMs = this.configService.get<number>('ai.batchDelayMs', 500);
+            await this.delay(delayMs);
+          }
+        }
+      );
+
+      // 刷新树视图
+      this.treeProvider.refresh();
+
+      // 显示结果统计
+      let resultMessage = `优化完成！\n✅ 成功：${successCount} 个\n❌ 失败：${failureCount} 个`;
+      if (failedPrompts.length > 0 && failedPrompts.length <= 5) {
+        resultMessage += `\n\n失败的 Prompt：\n${failedPrompts.map(p => `  • ${p}`).join('\n')}`;
+      }
+
+      void vscode.window.showInformationMessage(resultMessage, { modal: false });
+    } catch (error) {
+      void vscode.window.showErrorMessage(
+        `批量优化失败：${error instanceof Error ? error.message : String(error)}`
+      );
+    }
+  }
+
+  /**
+   * 解析标签输入，支持逗号或空格分隔
+   */
+  private parseTagsInput(input: string): string[] {
+    if (!input.trim()) {
+      return [];
+    }
+
+    return input
+      .split(/[,，]/) // 先按中英文逗号切分
+      .map((chunk) => chunk.split(/\s+/)) // 再按空白拆分，兼容用户输入
+      .flat()
+      .map((tag) => tag.trim())
+      .filter((tag) => tag.length > 0)
+      .filter((tag, index, arr) => arr.indexOf(tag) === index);
+  }
+
+  /**
+   * 基于选区内容生成默认 Prompt 名称
+   */
+  private generateDefaultPromptName(rawContent: string): string {
+    const normalized = (rawContent || '')
+      .replace(/\s+/g, ' ')
+      .trim();
+    const snippet = normalized.substring(0, 20);
+    const base = snippet || '选区 Prompt';
+    const safeBase = base.replace(/#/g, '').trim() || '选区 Prompt';
+    const existingNames = new Set(this.storageService.list().map((p) => p.name));
+
+    let index = 1;
+    let candidate = `${safeBase} #${index}`;
+    while (existingNames.has(candidate)) {
+      index += 1;
+      candidate = `${safeBase} #${index}`;
+    }
+
+    return candidate;
+  }
+
 }

@@ -137,6 +137,13 @@ npm run package
 
 按 `F5` 启动 Extension Development Host
 
+## TODO / 待实现
+- AI 辅助生成、优化等功能未在当前版本上线，相关按钮、命令、向导步骤不会显示。
+- AI 配置项 `promptHub.ai.*` 及 “AI 生成标题/emoji、AI 优化内容” 等命令仍未在 `package.json` 注册，UI 上不可用。
+- AI 消耗查看、日志统计目前未实施。
+- 首次使用向导目前仅包含存储、Git 配置，AI 配置未能请求。
+- Markdown 新建文件文件名询问、文末 AI 自动生成标题等设计项仍未上线。
+
 ## 🤝 贡献
 
 欢迎提交 Issue 和 Pull Request！

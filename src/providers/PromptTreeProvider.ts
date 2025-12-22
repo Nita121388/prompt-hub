@@ -119,9 +119,9 @@ class PromptTreeItem extends vscode.TreeItem {
     this.description = prompt.sourceFile ? 'md' : undefined;
     this.contextValue = 'prompt';
     this.command = {
-      command: 'promptHub.copyPromptContent',
-      title: '复制',
-      arguments: [this],
+      command: 'promptHub.onPromptItemClick',
+      title: '打开/复制',
+      arguments: [this.prompt],
     };
   }
 }

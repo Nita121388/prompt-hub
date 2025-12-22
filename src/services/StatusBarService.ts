@@ -43,8 +43,9 @@ export class StatusBarService {
    * 更新状态栏显示状态
    */
   private updateVisibility(): void {
-    const enabled = this.configService.get<boolean>('statusBar.enable', true);
-    if (enabled) {
+    const enabled = this.configService.get<boolean>('statusBar.enable');
+    const shouldShow = enabled === undefined ? true : enabled;
+    if (shouldShow) {
       this.statusBarItem.show();
     } else {
       this.statusBarItem.hide();

@@ -1,8 +1,11 @@
 import * as vscode from 'vscode';
 import * as fs from 'fs/promises';
+import { Dirent } from 'fs';
 import * as path from 'path';
 import { Prompt, PromptStorage } from '../types/Prompt';
 import { ConfigurationService } from './ConfigurationService';
+import { MarkdownPromptParser } from '../utils/MarkdownPromptParser';
+import { generateId } from '../utils/helpers';
 
 /**
  * Prompt 存储服务
@@ -33,6 +36,19 @@ export class PromptStorageService {
 
       // 加载 Prompt 数据
       await this.load();
+
+      // 尝试把存储目录中已有的 Markdown 文件导入到 prompts.json
+      const imported = await this.importMarkdownPrompts();
+      const pruned = await this.pruneMissingSourceFiles();
+      if (imported > 0 || pruned > 0) {
+        if (imported > 0) {
+          console.log(`[PromptStorageService] 从 Markdown 导入了 ${imported} 条 Prompt，写回 prompts.json`);
+        }
+        if (pruned > 0) {
+          console.log(`[PromptStorageService] 清理缺失源文件的 Prompt 数量: ${pruned}`);
+        }
+        await this.save();
+      }
 
       console.log(`Prompt 存储初始化成功，加载了 ${this.prompts.length} 个 Prompt`);
     } catch (error) {
@@ -237,10 +253,151 @@ export class PromptStorageService {
   }
 
   /**
+   * 从存储路径中的 Markdown 文件导入缺失的 Prompt
+   * - 适用于用户预先把 Markdown 放入存储目录但 prompts.json 尚未同步的场景
+   * - 仅针对 JSON 中没有登记 sourceFile 的 Markdown，避免重复导入
+   */
+  private async importMarkdownPrompts(): Promise<number> {
+    const parser = new MarkdownPromptParser(this.configService);
+    const files = await this.collectMarkdownFiles(this.storagePath);
+    if (!files.length) return 0;
+
+    let imported = 0;
+    for (const file of files) {
+      // 已有相同 sourceFile 的记录则跳过
+      if (this.prompts.some((p) => p.sourceFile === file)) {
+        continue;
+      }
+
+      try {
+        const text = await fs.readFile(file, 'utf-8');
+        const parsed = parser.parse(text);
+        const stat = await fs.stat(file);
+
+        const prompt: Prompt = {
+          id: parsed.id || this.makeUniqueId(),
+          name: parsed.name?.trim() || path.basename(file, path.extname(file)),
+          emoji: parsed.emoji,
+          content: (parsed.content || text).trim(),
+          createdAt: stat.birthtime.toISOString(),
+          updatedAt: stat.mtime.toISOString(),
+          sourceFile: file,
+          tags: parsed.tags ?? [],
+        };
+
+        // 若 ID 冲突则生成新的 ID，避免覆盖已有数据
+        if (this.prompts.some((p) => p.id === prompt.id)) {
+          prompt.id = this.makeUniqueId();
+        }
+
+        this.prompts.push(prompt);
+        imported += 1;
+        console.log(`[PromptStorageService] 从 Markdown 导入 Prompt: ${prompt.name} (${file})`);
+      } catch (err) {
+        console.error('[PromptStorageService] 导入 Markdown Prompt 失败:', file, err);
+      }
+    }
+
+    return imported;
+  }
+
+  /** 递归收集存储目录下的 Markdown 文件，忽略常见无关目录 */
+  private async collectMarkdownFiles(root: string): Promise<string[]> {
+    const result: string[] = [];
+    const ignoreDirs = new Set(['.git', 'node_modules', '.vscode', '.obsidian']);
+
+    const walk = async (dir: string) => {
+      let entries: Dirent[];
+      try {
+        entries = await fs.readdir(dir, { withFileTypes: true });
+      } catch (err) {
+        console.error('[PromptStorageService] 遍历目录失败:', dir, err);
+        return;
+      }
+
+      for (const entry of entries) {
+        const fullPath = path.join(dir, entry.name);
+        if (entry.isDirectory()) {
+          if (ignoreDirs.has(entry.name)) continue;
+          await walk(fullPath);
+        } else if (entry.isFile() && entry.name.toLowerCase().endsWith('.md')) {
+          result.push(fullPath);
+        }
+      }
+    };
+
+    await walk(root);
+    return result;
+  }
+
+  /** 生成不与现有 Prompt 冲突的唯一 ID */
+  private makeUniqueId(): string {
+    let id = generateId();
+    while (this.prompts.some((p) => p.id === id)) {
+      id = generateId();
+    }
+    return id;
+  }
+
+  /**
+   * 在配置中的 storagePath 变更时，重新加载并触发事件
+   */
+  async updateStoragePath(newPath: string): Promise<void> {
+    console.log('[PromptStorageService] 检测到新的 storagePath:', newPath);
+    this.storagePath = newPath;
+    this.storageFile = path.join(newPath, 'prompts.json');
+
+    await this.ensureStorageDirectory();
+    await this.load();
+    const imported = await this.importMarkdownPrompts();
+    const pruned = await this.pruneMissingSourceFiles();
+    if (imported > 0 || pruned > 0) {
+      await this.save();
+    } else {
+      this._onDidChangePrompts.fire();
+    }
+  }
+
+  /**
    * 刷新（重新加载）
    */
   async refresh(): Promise<void> {
     await this.load();
-    this._onDidChangePrompts.fire();
+    const imported = await this.importMarkdownPrompts();
+    const pruned = await this.pruneMissingSourceFiles();
+    if (imported > 0 || pruned > 0) {
+      await this.save();
+    } else {
+      this._onDidChangePrompts.fire();
+    }
+  }
+
+  /**
+   * 清理已删除源文件的 Prompt，避免 TreeView 残留
+   */
+  private async pruneMissingSourceFiles(): Promise<number> {
+    const kept: Prompt[] = [];
+    let removed = 0;
+
+    for (const p of this.prompts) {
+      if (!p.sourceFile) {
+        kept.push(p);
+        continue;
+      }
+
+      try {
+        await fs.access(p.sourceFile);
+        kept.push(p);
+      } catch {
+        removed += 1;
+        console.warn('[PromptStorageService] 源文件不存在，已清理 Prompt:', p.name, '(', p.sourceFile, ')');
+      }
+    }
+
+    if (removed > 0) {
+      this.prompts = kept;
+    }
+
+    return removed;
   }
 }

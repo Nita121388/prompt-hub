@@ -2,7 +2,7 @@
   "name": "prompt-hub",
   "displayName": "Prompt Hub",
   "description": "VSCode 插件，用于统一管理和组织 AI Prompt，支持本地存储、Git 同步、AI 辅助生成",
-  "version": "0.1.0",
+  "version": "0.1.2",
   "engines": {
     "vscode": "^1.85.0"
   },
@@ -37,21 +37,10 @@
         "icon": "$(new-file)"
       },
       {
-        "command": "promptHub.aiGenerateMeta",
-        "title": "✨ 生成标题/emoji",
-        "category": "Prompt Hub"
-      },
-      {
-        "command": "promptHub.aiOptimize",
-        "title": "🚀 优化 Prompt 内容",
-        "category": "Prompt Hub",
-        "icon": "$(sparkle)"
-      },
-      {
         "command": "promptHub.gitSync",
         "title": "🔀 Git 同步",
         "category": "Prompt Hub",
-        "icon": "$(sync)"
+        "icon": "$(cloud-upload)"
       },
       {
         "command": "promptHub.searchPrompt",
@@ -108,7 +97,29 @@
         "command": "promptHub.showQuickPick",
         "title": "📋 Prompt Hub: 快速访问",
         "category": "Prompt Hub",
-        "icon": "$(list-selection)"
+        "icon": "$(rocket)"
+      },
+      {
+        "command": "promptHub.batchGenerateMeta",
+        "title": "批量生成标题和图标",
+        "category": "Prompt Hub"
+      },
+      {
+        "command": "promptHub.batchGenerateMetaSelected",
+        "title": "批量生成标题和图标（选中）",
+        "category": "Prompt Hub"
+      },
+      {
+        "command": "promptHub.optimizeMeta",
+        "title": "✨优化唤醒词",
+        "category": "Prompt Hub",
+        "icon": "$(sparkle)"
+      },
+      {
+        "command": "promptHub.batchOptimizeMeta",
+        "title": "✨批量优化唤醒词",
+        "category": "Prompt Hub",
+        "icon": "$(sparkle)"
       }
     ],
     "submenus": [
@@ -147,6 +158,11 @@
           "command": "promptHub.createFromSelection",
           "when": "editorHasSelection",
           "group": "1_prompts"
+        },
+        {
+          "command": "promptHub.searchPrompt",
+          "when": "editorHasSelection",
+          "group": "1_prompts@2"
         }
       ],
       "view/title": [
@@ -179,6 +195,11 @@
           "command": "promptHub.showQuickPick",
           "when": "view == promptHubView",
           "group": "navigation"
+        },
+        {
+          "command": "promptHub.batchOptimizeMeta",
+          "when": "view == promptHubView",
+          "group": "navigation@7"
         }
       ],
       "view/item/context": [
@@ -193,14 +214,9 @@
           "group": "inline@2"
         },
         {
-          "command": "promptHub.aiOptimize",
-          "when": "view == promptHubView && viewItem == prompt",
-          "group": "inline@3"
-        },
-        {
           "command": "promptHub.deletePrompt",
           "when": "view == promptHubView && viewItem == prompt",
-          "group": "inline@4"
+          "group": "inline@3"
         },
         {
           "command": "promptHub.copyPromptContent",
@@ -213,19 +229,15 @@
           "group": "1_basic@2"
         },
         {
-          "command": "promptHub.aiGenerateMeta",
-          "when": "view == promptHubView && viewItem == prompt",
-          "group": "2_ai@1"
-        },
-        {
-          "command": "promptHub.aiOptimize",
-          "when": "view == promptHubView && viewItem == prompt",
-          "group": "2_ai@2"
-        },
-        {
           "command": "promptHub.deletePrompt",
           "when": "view == promptHubView && viewItem == prompt",
           "group": "3_danger"
+        },
+        {
+          "command": "promptHub.optimizeMeta",
+          "when": "view == promptHubView && viewItem == prompt",
+          "group": "inline@4",
+          "icon": "$(sparkle)"
         }
       ]
     },
@@ -243,12 +255,6 @@
           "default": true,
           "description": "目录不存在时是否自动创建",
           "order": 2
-        },
-        "promptHub.markdown.enableMirror": {
-          "type": "boolean",
-          "default": true,
-          "markdownDescription": "是否启用 Markdown 镜像（将Markdown文件自动同步到Prompt存储）。\n\n**建议保持启用**，否则新建的Prompt文件不会显示在侧边栏。\n\n禁用后，只有通过「从选区创建」的Prompt才会显示。",
-          "order": 10
         },
         "promptHub.markdown.filenameTemplate": {
           "type": "string",
@@ -292,33 +298,6 @@
           "description": "提交信息模板，支持 {datetime} 占位符",
           "order": 32
         },
-        "promptHub.ai.provider": {
-          "type": "string",
-          "default": "openai",
-          "enum": ["openai", "azure", "qwen", "custom"],
-          "description": "AI 提供商",
-          "order": 40
-        },
-        "promptHub.ai.model": {
-          "type": "string",
-          "default": "gpt-4o",
-          "description": "使用的模型名称",
-          "order": 41
-        },
-        "promptHub.ai.baseUrl": {
-          "type": "string",
-          "default": "https://api.openai.com/v1",
-          "description": "API 基础 URL",
-          "order": 42
-        },
-        "promptHub.ai.temperature": {
-          "type": "number",
-          "default": 0.7,
-          "minimum": 0,
-          "maximum": 2,
-          "description": "生成温度，范围 0-2",
-          "order": 43
-        },
         "promptHub.ui.showEmojiPicker": {
           "type": "boolean",
           "default": true,
@@ -328,16 +307,106 @@
         "promptHub.ui.sortBy": {
           "type": "string",
           "default": "recent",
-          "enum": ["recent", "name", "created", "usage"],
-          "enumDescriptions": ["最近使用", "名称", "创建时间", "使用次数"],
+          "enum": [
+            "recent",
+            "name",
+            "created",
+            "usage"
+          ],
+          "enumDescriptions": [
+            "最近使用",
+            "名称",
+            "创建时间",
+            "使用次数"
+          ],
           "description": "排序方式",
           "order": 51
+        },
+        "promptHub.git.autoSyncOnSave": {
+          "type": "boolean",
+          "default": true,
+          "description": "保存 Prompt Markdown 文件后，是否自动触发 Git 同步（在延迟时间后执行）",
+          "order": 33
+        },
+        "promptHub.git.autoSyncDelaySeconds": {
+          "type": "number",
+          "default": 60,
+          "minimum": 5,
+          "maximum": 3600,
+          "description": "自动 Git 同步延迟时间（秒）。例如 60 表示保存后约 1 分钟执行同步",
+          "order": 34
         },
         "promptHub.statusBar.enable": {
           "type": "boolean",
           "default": true,
           "description": "是否显示状态栏图标",
           "order": 52
+        },
+        "promptHub.ai.provider": {
+          "type": "string",
+          "default": "",
+          "enum": [
+            "",
+            "openai",
+            "azure",
+            "gemini",
+            "deepseek",
+            "qwen",
+            "custom",
+            "local-claude",
+            "local-codex"
+          ],
+          "enumDescriptions": [
+            "未配置",
+            "OpenAI 官方接口",
+            "Azure OpenAI 服务",
+            "Google Gemini",
+            "DeepSeek",
+            "通义千问",
+            "自定义 Provider（自建网关等）",
+            "本地 Claude Code CLI（推荐）",
+            "本地 Codex"
+          ],
+          "description": "AI 提供商标识（配置向导会自动写入）",
+          "order": 61
+        },
+        "promptHub.ai.model": {
+          "type": "string",
+          "default": "",
+          "description": "AI 模型名称（如 gpt-4o、qwen-turbo），配置向导会自动写入",
+          "order": 62
+        },
+        "promptHub.ai.baseUrl": {
+          "type": "string",
+          "default": "https://api.openai.com/v1",
+          "description": "AI API Base URL，自定义 Provider 或 Azure 使用时可修改",
+          "order": 63
+        },
+        "promptHub.ai.batchDelayMs": {
+          "type": "number",
+          "default": 500,
+          "minimum": 100,
+          "maximum": 10000,
+          "description": "批量生成时两个 API 调用之间的延迟（毫秒），避免速率限制",
+          "order": 60
+        },
+        "promptHub.local.claudePath": {
+          "type": "string",
+          "default": "",
+          "description": "本地 Claude Code CLI 路径（留空自动检测，支持 ~ 和环境变量）",
+          "order": 71
+        },
+        "promptHub.local.codexPath": {
+          "type": "string",
+          "default": "",
+          "description": "本地 Codex 可执行文件路径（留空自动检测，支持 ~ 和环境变量）",
+          "order": 72
+        },
+        "promptHub.local.codexModel": {
+          "type": "string",
+          "default": "claude-sonnet-4.5",
+          "description": "Codex 使用的模型名称",
+          "order": 73
         }
       }
     }
@@ -372,8 +441,8 @@
   "publisher": "your-publisher-name",
   "repository": {
     "type": "git",
-    "url": "https://github.com/your-username/prompt-hub"
+    "url": "https://github.com/Nita121388/prompt-hub"
   },
   "license": "MIT",
-  "icon": "resources/icon.svg"
+  "icon": "resources/icon.png"
 }

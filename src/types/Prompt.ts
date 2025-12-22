@@ -107,7 +107,7 @@ export interface OnboardingState {
   gitRemoteUrl?: string;
 
   /** AI 提供商 */
-  aiProvider?: 'openai' | 'azure' | 'qwen' | 'custom';
+  aiProvider?: 'openai' | 'azure' | 'gemini' | 'deepseek' | 'qwen' | 'custom' | 'local-claude' | 'local-codex';
 
   /** AI 模型 */
   aiModel?: string;
