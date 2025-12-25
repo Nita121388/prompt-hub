@@ -30,12 +30,37 @@ export class PromptFileService {
       'markdown.filenameTemplate',
       'prompt-{timestamp}.md'
     );
+    const askForFilename = this.configService.get<boolean>('markdown.askForFilename', false);
     console.log('[PromptFileService] 存储路径:', storagePath);
     console.log('[PromptFileService] 文件名模板:', template);
+    console.log('[PromptFileService] 是否询问文件名:', askForFilename);
 
     // 生成默认文件名（使用时间戳等占位符）
-    const defaultName = this.formatFilename(template, {});
+    let defaultName = this.formatFilename(template, {});
     console.log('[PromptFileService] 生成的默认文件名:', defaultName);
+
+    // 如配置要求，创建时询问用户文件名
+    if (askForFilename) {
+      const input = await vscode.window.showInputBox({
+        title: '新建 Prompt 文件',
+        prompt: '请输入文件名（仅文件名，不含路径；可留空使用默认）',
+        value: defaultName,
+        placeHolder: '例如：我的提示.md',
+      });
+
+      // 用户取消则直接退出，不创建文件
+      if (input === undefined) {
+        console.log('[PromptFileService] 用户取消输入文件名，终止创建流程');
+        return;
+      }
+
+      const picked = input.trim();
+      defaultName = picked || defaultName;
+      if (!defaultName.toLowerCase().endsWith('.md')) {
+        defaultName += '.md';
+      }
+      console.log('[PromptFileService] 用户输入的文件名:', defaultName);
+    }
 
     // 再做一遍简单清洗，防止非法字符
     const finalName = this.sanitizeFilename(defaultName);
@@ -171,7 +196,17 @@ export class PromptFileService {
     if (!name.toLowerCase().endsWith('.md')) {
       name += '.md';
     }
-    return this.sanitizeFilename(name);
+
+    name = this.sanitizeFilename(name);
+
+    // 防御性处理：如果模板依赖 {name}/{emoji} 但上下文为空，可能生成空文件名（例如 ".md" / "-.md"）
+    const parsed = path.parse(name);
+    const onlySeparators = parsed.name.replace(/[-_\\s]/g, '').length === 0;
+    if (!parsed.name || onlySeparators) {
+      return this.sanitizeFilename(`prompt-${timestamp}.md`);
+    }
+
+    return name;
   }
 
   /**
@@ -231,4 +266,3 @@ export class PromptFileService {
     };
   }
 }
-

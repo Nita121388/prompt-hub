@@ -24,14 +24,36 @@ export class AIService {
   }
 
   private async getApiKey(provider?: AIProvider): Promise<string | undefined> {
-    const storageName = provider ? `ai.apiKey.${provider}` : 'ai.apiKey';
-    const stored = await this.config.getSecret(storageName);
-    if (stored) return stored;
+    const providerStorageName = provider ? `ai.apiKey.${provider}` : undefined;
+
+    // 1) 先读“按 provider 分桶”的 key（新格式）
+    if (providerStorageName) {
+      const stored = await this.config.getSecret(providerStorageName);
+      if (stored) return stored;
+    }
+
+    // 2) 再读“通用 key”（旧格式，配置向导历史版本写入 promptHub.ai.apiKey）
+    const legacy = await this.config.getSecret('ai.apiKey');
+    if (legacy) {
+      // 迁移：补写一份到新格式，避免后续每次都走降级
+      if (providerStorageName) {
+        await this.config.storeSecret(providerStorageName, legacy);
+      }
+      return legacy;
+    }
+
+    // 3) 最后再弹窗询问
     const input = await vscode.window.showInputBox({
       prompt: `输入 ${provider || 'AI'} API Key（将安全保存在 VSCode SecretStorage）`,
       password: true,
     });
-    if (input) await this.config.storeSecret(storageName, input);
+    if (!input) return undefined;
+
+    if (providerStorageName) {
+      await this.config.storeSecret(providerStorageName, input);
+    } else {
+      await this.config.storeSecret('ai.apiKey', input);
+    }
     return input;
   }
 
@@ -76,16 +98,51 @@ export class AIService {
   /**
    * 构建 API 端点 URL
    */
-  private buildApiUrl(provider: AIProvider, baseUrl?: string): string {
+  private buildApiUrl(provider: AIProvider, baseUrl?: string, model?: string): string {
+    const normalizedBaseUrl = (baseUrl || '').trim().replace(/\/+$/, '');
+
     switch (provider) {
       case 'gemini':
-        return 'https://generativelanguage.googleapis.com/v1beta/models';
+        // Gemini: 允许用户传入完整 endpoint（包含 :generateContent）或仅传 models base
+        // 规范格式：https://.../v1beta/models/{model}:generateContent
+        if (normalizedBaseUrl && normalizedBaseUrl.includes(':generateContent')) {
+          return normalizedBaseUrl;
+        }
+
+        const geminiBase = normalizedBaseUrl || 'https://generativelanguage.googleapis.com/v1beta/models';
+        const normalizedModel = (model || '').trim();
+
+        // 如果 baseUrl 已经带了 models/{model}
+        if (/\/models\/[^/]+$/.test(geminiBase)) {
+          return `${geminiBase}:generateContent`;
+        }
+
+        // 否则尝试补上 model
+        if (normalizedModel) {
+          return `${geminiBase}/${normalizedModel}:generateContent`;
+        }
+
+        // 没有 model 时保持兼容（可能会失败，但至少 URL 结构可读）
+        return `${geminiBase}:generateContent`;
       case 'deepseek':
-        return baseUrl || 'https://api.deepseek.com/chat/completions';
+        // DeepSeek（OpenAI 兼容）：默认 /chat/completions
+        if (normalizedBaseUrl) {
+          if (/\/chat\/completions(\?|$)/.test(normalizedBaseUrl)) return normalizedBaseUrl;
+          if (/\/v\d+$/.test(normalizedBaseUrl)) return `${normalizedBaseUrl}/chat/completions`;
+          return `${normalizedBaseUrl}/v1/chat/completions`;
+        }
+        return 'https://api.deepseek.com/chat/completions';
       case 'azure':
-        return baseUrl || 'https://{resource-name}.openai.azure.com/openai/deployments/{deployment-id}/chat/completions?api-version=2024-02-15-preview';
+        // Azure：通常需要完整 endpoint（包含 deployments、api-version 等）
+        return normalizedBaseUrl || 'https://{resource-name}.openai.azure.com/openai/deployments/{deployment-id}/chat/completions?api-version=2024-02-15-preview';
       default:
-        return `${baseUrl || 'https://api.openai.com'}/v1/chat/completions`;
+        // OpenAI 兼容（OpenAI / Qwen / Custom 等）
+        if (normalizedBaseUrl) {
+          if (/\/chat\/completions(\?|$)/.test(normalizedBaseUrl)) return normalizedBaseUrl;
+          if (/\/v\d+$/.test(normalizedBaseUrl)) return `${normalizedBaseUrl}/chat/completions`;
+          return `${normalizedBaseUrl}/v1/chat/completions`;
+        }
+        return 'https://api.openai.com/v1/chat/completions';
     }
   }
 
@@ -130,14 +187,18 @@ export class AIService {
   }
 
   async generateMeta(content: string): Promise<GeneratedMeta> {
-    const provider = this.config.get<AIProvider>('ai.provider', 'openai');
+    const providerRaw = this.config.get<string>('ai.provider', '').trim();
+    if (!providerRaw) {
+      void vscode.window.showWarningMessage('尚未配置 AI 提供商，请先运行「Prompt Hub: 配置向导」或在设置中配置 promptHub.ai.provider。');
+      return {};
+    }
+
+    const provider = providerRaw as AIProvider;
     const supportedProviders: AIProvider[] = ['openai', 'azure', 'gemini', 'deepseek', 'qwen', 'custom', 'local-claude', 'local-codex'];
 
     if (!supportedProviders.includes(provider)) {
       void vscode.window.showWarningMessage(`不支持的 AI 提供商：${provider}`);
-      // 降级处理
-      const line = content.split('\n')[0].trim().slice(0, 40);
-      return { name: line || '未命名', emoji: '📝' };
+      return {};
     }
 
     // 本地 Claude Code
@@ -146,7 +207,7 @@ export class AIService {
         return await this.localClaudeProvider.generateMeta(content);
       } catch (error) {
         void vscode.window.showWarningMessage(`本地 Claude Code 调用失败：${(error as Error).message}`);
-        return this.fallbackMeta(content);
+        return {};
       }
     }
 
@@ -156,7 +217,7 @@ export class AIService {
         return await this.localCodexProvider.generateMeta(content);
       } catch (error) {
         void vscode.window.showWarningMessage(`本地 Codex 调用失败：${(error as Error).message}`);
-        return this.fallbackMeta(content);
+        return {};
       }
     }
 
@@ -165,8 +226,9 @@ export class AIService {
       const apiKey = await this.getApiKey(provider);
       if (!apiKey) throw new Error('未配置 API Key');
 
-      const baseUrl = this.config.get<string>('ai.baseUrl', this.buildApiUrl(provider));
-      const model = this.config.get<string>('ai.model', this.getDefaultModel(provider));
+      const baseUrl = this.config.get<string>('ai.baseUrl', '').trim();
+      const configuredModel = this.config.get<string>('ai.model', '').trim();
+      const model = configuredModel || this.getDefaultModel(provider);
       const temperature = this.config.get<number>('ai.temperature', 0.4);
 
       const systemPrompt = '你是一个提示词整理助手。根据用户提供的文本，返回一个 JSON：{"name":"简短标题","emoji":"一个合适的emoji"}。仅输出 JSON。';
@@ -177,7 +239,8 @@ export class AIService {
         { role: 'user', content: userContent },
       ]);
 
-      const url = provider === 'gemini' ? `${baseUrl}:generateContent?key=${apiKey}` : baseUrl;
+      const endpoint = this.buildApiUrl(provider, baseUrl, model);
+      const url = provider === 'gemini' ? `${endpoint}?key=${apiKey}` : endpoint;
       const headers = this.buildHeaders(provider, apiKey);
 
       const res = await fetch(url, {
@@ -201,14 +264,18 @@ export class AIService {
       }
     } catch (e) {
       void vscode.window.showWarningMessage(`AI 元信息生成失败：${(e as Error).message}`);
-      // 降级处理
-      const line = content.split('\n')[0].trim().slice(0, 40);
-      return { name: line || '未命名', emoji: '📝' };
+      return {};
     }
   }
 
   async optimize(content: string): Promise<string> {
-    const provider = this.config.get<AIProvider>('ai.provider', 'openai');
+    const providerRaw = this.config.get<string>('ai.provider', '').trim();
+    if (!providerRaw) {
+      void vscode.window.showWarningMessage('尚未配置 AI 提供商，请先运行「Prompt Hub: 配置向导」或在设置中配置 promptHub.ai.provider。');
+      return content;
+    }
+
+    const provider = providerRaw as AIProvider;
     const supportedProviders: AIProvider[] = ['openai', 'azure', 'gemini', 'deepseek', 'qwen', 'custom', 'local-claude', 'local-codex'];
 
     if (!supportedProviders.includes(provider)) {
@@ -241,8 +308,9 @@ export class AIService {
       const apiKey = await this.getApiKey(provider);
       if (!apiKey) throw new Error('未配置 API Key');
 
-      const baseUrl = this.config.get<string>('ai.baseUrl', this.buildApiUrl(provider));
-      const model = this.config.get<string>('ai.model', this.getDefaultModel(provider));
+      const baseUrl = this.config.get<string>('ai.baseUrl', '').trim();
+      const configuredModel = this.config.get<string>('ai.model', '').trim();
+      const model = configuredModel || this.getDefaultModel(provider);
       const temperature = this.config.get<number>('ai.temperature', 0.3);
 
       const systemPrompt = '你是一个提示词优化助手。请将提示词润色为清晰、简短、有条理的中文 Markdown 文本，保留原意。只返回优化后的文本。';
@@ -253,7 +321,8 @@ export class AIService {
         { role: 'user', content: userContent },
       ]);
 
-      const url = provider === 'gemini' ? `${baseUrl}:generateContent?key=${apiKey}` : baseUrl;
+      const endpoint = this.buildApiUrl(provider, baseUrl, model);
+      const url = provider === 'gemini' ? `${endpoint}?key=${apiKey}` : endpoint;
       const headers = this.buildHeaders(provider, apiKey);
 
       const res = await fetch(url, {
@@ -304,4 +373,3 @@ export class AIService {
     }
   }
 }
-

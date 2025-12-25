@@ -14,6 +14,8 @@ export interface ParsedMarkdownPrompt {
   emoji?: string;
   /** frontmatter 中声明的标签 */
   tags?: string[];
+  /** 是否允许保存时自动重命名文件（frontmatter: rename: true/false） */
+  rename?: boolean;
   /** 正文内容（不含 frontmatter 和标题行） */
   content: string;
 }
@@ -42,6 +44,7 @@ export class MarkdownPromptParser {
     const name = meta.name ?? parsedBody.name;
     const emoji = meta.emoji ?? parsedBody.emoji;
     const tags = meta.tags;
+    const rename = meta.rename;
     const content = (parsedBody.content ?? normalizedBody).trim();
 
     return {
@@ -49,6 +52,7 @@ export class MarkdownPromptParser {
       name,
       emoji,
       tags,
+      rename,
       content,
     };
   }
@@ -101,6 +105,7 @@ export class MarkdownPromptParser {
     emoji?: string;
     tags?: string[];
     type?: string;
+    rename?: boolean;
   } {
     const result: {
       id?: string;
@@ -108,6 +113,7 @@ export class MarkdownPromptParser {
       emoji?: string;
       tags?: string[];
       type?: string;
+      rename?: boolean;
     } = {};
 
     if (!raw.trim()) {
@@ -154,6 +160,13 @@ export class MarkdownPromptParser {
             result.type = this.stripQuotes(value);
           }
           break;
+        case 'rename': {
+          const parsed = this.parseBoolean(value);
+          if (parsed !== undefined) {
+            result.rename = parsed;
+          }
+          break;
+        }
         default:
           // 其他字段暂时忽略
           break;
@@ -161,6 +174,15 @@ export class MarkdownPromptParser {
     }
 
     return result;
+  }
+
+  private parseBoolean(raw: string): boolean | undefined {
+    const v = this.stripQuotes(raw).trim().toLowerCase();
+    if (!v) return undefined;
+
+    if (['true', 'yes', 'y', '1', 'on'].includes(v)) return true;
+    if (['false', 'no', 'n', '0', 'off'].includes(v)) return false;
+    return undefined;
   }
 
   /**
@@ -221,4 +243,3 @@ export class MarkdownPromptParser {
     return lines.slice(start).join('\n');
   }
 }
-

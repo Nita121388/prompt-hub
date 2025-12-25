@@ -10,7 +10,7 @@ import { PromptTreeProvider } from '../providers/PromptTreeProvider';
 import { OnboardingWizard } from '../services/OnboardingWizard';
 import { SelectionParser } from '../utils/SelectionParser';
 import { Prompt } from '../types/Prompt';
-import { generateId } from '../utils/helpers';
+import { generateId, sanitizeFilename } from '../utils/helpers';
 import { PromptFileService } from '../services/PromptFileService';
 import { AIService } from '../services/AIService';
 import { GitSyncService } from '../services/GitSyncService';
@@ -83,6 +83,7 @@ export class CommandRegistrar {
     this.register('promptHub.createFromSelection', () => this.createFromSelection());
     this.register('promptHub.newPromptFile', () => this.newPromptFile());
     this.register('promptHub.searchPrompt', () => this.searchPrompt());
+    this.register('promptHub.renamePromptFile', (context?: any) => this.renamePromptFile(context));
     this.register('promptHub.copyPromptContent', (context?: any) =>
       this.copyPromptContent(context)
     );
@@ -93,6 +94,7 @@ export class CommandRegistrar {
     this.register('promptHub.startOnboarding', () => this.startOnboarding());
     this.register('promptHub.resetOnboarding', () => this.resetOnboarding());
     this.register('promptHub.deletePrompt', (context?: any) => this.deletePrompt(context));
+    this.register('promptHub.gitPull', () => this.gitPull());
     this.register('promptHub.gitSync', () => this.gitSync());
     this.register('promptHub.showQuickPick', () => this.showQuickPick());
     this.register('promptHub.onPromptItemClick', (prompt?: Prompt) => this.onPromptTreeItemClick(prompt));
@@ -288,6 +290,94 @@ export class CommandRegistrar {
     await vscode.window.showTextDocument(doc, { preview: false });
   }
 
+  /**
+   * 按 Prompt 的标题/emoji 重命名其 Markdown 源文件
+   * - 不依赖时间戳规则：只要用户触发命令就直接重命名
+   * - 用户不想重命名 → 不执行该命令即可
+   */
+  private async renamePromptFile(context?: any): Promise<void> {
+    const prompt = await this.ensurePromptSelected(context);
+    if (!prompt) return;
+
+    console.log('[CommandRegistrar] renamePromptFile 调用 - promptId:', prompt.id, ', sourceFile:', prompt.sourceFile);
+
+    if (!prompt.sourceFile) {
+      console.log('[CommandRegistrar] renamePromptFile 跳过：无 sourceFile');
+      void vscode.window.showWarningMessage('该 Prompt 没有关联的源文件，无法重命名。');
+      return;
+    }
+
+    const storagePath = this.configService.getStoragePath();
+    if (!this.isInside(storagePath, prompt.sourceFile)) {
+      console.log('[CommandRegistrar] renamePromptFile 跳过：文件不在存储目录内', storagePath);
+      void vscode.window.showWarningMessage('该文件不在 Prompt 存储目录内，出于安全考虑跳过重命名。');
+      return;
+    }
+
+    const trimmedName = (prompt.name || '').trim().replace(/\.md$/i, '');
+    if (!trimmedName || trimmedName === '在此填写标题') {
+      console.log('[CommandRegistrar] renamePromptFile 跳过：标题为空或默认占位符', trimmedName);
+      void vscode.window.showWarningMessage('标题为空或仍为默认占位符，无法用于重命名。');
+      return;
+    }
+
+    const dir = path.dirname(prompt.sourceFile);
+    const emojiPart = prompt.emoji ? `${prompt.emoji}-` : '';
+    const base = `${emojiPart}${trimmedName}`;
+    const safeBase = sanitizeFilename(base).replace(/-+/g, '-').replace(/^-|-$/g, '');
+    if (!safeBase) {
+      console.log('[CommandRegistrar] renamePromptFile 跳过：标题清洗后为空', base);
+      void vscode.window.showWarningMessage('标题清洗后为空，无法用于重命名。');
+      return;
+    }
+
+    const desiredPath = path.join(dir, `${safeBase}.md`);
+    const currentPath = prompt.sourceFile;
+
+    // 新旧相同则直接结束
+    if (path.resolve(desiredPath) === path.resolve(currentPath)) {
+      console.log('[CommandRegistrar] renamePromptFile 跳过：文件名已一致', desiredPath);
+      void vscode.window.showInformationMessage('文件名已与标题一致，无需重命名。');
+      return;
+    }
+
+    const targetPath = await this.makeUniquePath(desiredPath, currentPath);
+
+    try {
+      console.log('[CommandRegistrar] renamePromptFile 开始重命名:', currentPath, '->', targetPath);
+      await vscode.workspace.fs.rename(
+        vscode.Uri.file(currentPath),
+        vscode.Uri.file(targetPath),
+        { overwrite: false }
+      );
+
+      const updated: Prompt = {
+        ...prompt,
+        sourceFile: targetPath,
+        updatedAt: new Date().toISOString(),
+      };
+      await this.storageService.update(updated);
+      this.treeProvider.refresh();
+      console.log('[CommandRegistrar] renamePromptFile 重命名成功，已更新存储 sourceFile');
+
+      // 如果文件已打开，切换到新文件
+      const opened = vscode.workspace.textDocuments.find((d) => d.uri.fsPath === currentPath);
+      if (opened) {
+        await vscode.window.showTextDocument(opened);
+        await vscode.commands.executeCommand('workbench.action.closeActiveEditor');
+        const newDoc = await vscode.workspace.openTextDocument(targetPath);
+        await vscode.window.showTextDocument(newDoc, { preview: false });
+      }
+
+      void vscode.window.showInformationMessage(`已重命名文件：${path.basename(targetPath)}`);
+    } catch (err) {
+      console.error('[CommandRegistrar] renamePromptFile 重命名失败:', err);
+      void vscode.window.showErrorMessage(
+        `重命名文件失败：${err instanceof Error ? err.message : String(err)}`
+      );
+    }
+  }
+
   /** 刷新 TreeView 与存储 */
   private async refreshView(): Promise<void> {
     await this.storageService.refresh();
@@ -429,16 +519,136 @@ export class CommandRegistrar {
   /** Git 同步 */
   private async gitSync(): Promise<void> {
     const git = new GitSyncService(this.configService);
+    let importBackupDir: string | null = null;
+
     await vscode.window.withProgress(
       {
         location: vscode.ProgressLocation.Notification,
         title: 'Prompt Hub: 正在执行 Git 同步...',
       },
       async () => {
+        // 新设备常见场景：storagePath 不是仓库，但用户希望从远端拉取到本地
+        if (!(await git.isGitRepo())) {
+          const remoteUrl = await this.ensureRemoteUrlForImport(git);
+          if (!remoteUrl) {
+            throw new Error('已取消 Git 导入/同步。');
+          }
+          await git.importFromRemote(remoteUrl);
+          importBackupDir = git.getLastImportBackupDir();
+        }
+
         await git.sync();
       }
     );
+
+    await this.refreshAfterGit();
+    if (importBackupDir) {
+      void vscode.window.showWarningMessage(
+        `Prompt Hub: 导入前已将现有文件备份到：${importBackupDir}`
+      );
+    }
     void vscode.window.showInformationMessage('Prompt Hub: Git 同步完成。');
+  }
+
+  /** Git 拉取/导入（新设备一键把远端 prompts 拉到本地） */
+  private async gitPull(): Promise<void> {
+    const git = new GitSyncService(this.configService);
+    let importBackupDir: string | null = null;
+
+    await vscode.window.withProgress(
+      {
+        location: vscode.ProgressLocation.Notification,
+        title: 'Prompt Hub: 正在拉取/导入远端内容...',
+      },
+      async () => {
+        if (!(await git.isGitRepo())) {
+          const remoteUrl = await this.ensureRemoteUrlForImport(git);
+          if (!remoteUrl) {
+            throw new Error('已取消 Git 导入。');
+          }
+          await git.importFromRemote(remoteUrl);
+          importBackupDir = git.getLastImportBackupDir();
+          return;
+        }
+
+        // 已是仓库：直接 pull（若缺少 origin，会走 importFromRemote 的补齐逻辑）
+        const remoteUrl = await this.ensureRemoteUrlForImport(git, {
+          allowSkipIfOriginExists: true,
+        });
+        await git.pullRebase(remoteUrl ?? undefined);
+      }
+    );
+
+    await this.refreshAfterGit();
+    if (importBackupDir) {
+      void vscode.window.showWarningMessage(
+        `Prompt Hub: 导入前已将现有文件备份到：${importBackupDir}`
+      );
+    }
+
+    const count = this.storageService.list().length;
+    if (count <= 0) {
+      const storagePath = this.configService.getStoragePath();
+      const selected = await vscode.window.showWarningMessage(
+        `Prompt Hub: Git 拉取/导入完成，但未发现任何 Prompt（prompts.json/Markdown）。请确认仓库内容与 storagePath 是否正确：${storagePath}`,
+        '打开存储目录',
+        '打开设置',
+        '开启 Git 诊断日志'
+      );
+
+      if (selected === '打开存储目录') {
+        await vscode.commands.executeCommand('promptHub.openStorageFolder');
+      } else if (selected === '打开设置') {
+        this.configService.openSettings();
+      } else if (selected === '开启 Git 诊断日志') {
+        await this.configService.set('git.debugLog', true, vscode.ConfigurationTarget.Global);
+        void vscode.window.showInformationMessage('Prompt Hub: 已开启 Git 诊断日志，可重新执行一次拉取/导入以收集更多信息。');
+      }
+
+      return;
+    }
+
+    void vscode.window.showInformationMessage(`Prompt Hub: Git 拉取/导入完成（${count} 条 Prompt）。`);
+  }
+
+  private async refreshAfterGit(): Promise<void> {
+    try {
+      await this.storageService.refresh();
+      this.treeProvider.refresh();
+    } catch (error) {
+      console.error('[CommandRegistrar] Git 操作后刷新失败:', error);
+    }
+  }
+
+  private async ensureRemoteUrlForImport(
+    git: GitSyncService,
+    options?: { allowSkipIfOriginExists?: boolean }
+  ): Promise<string | null> {
+    const origin = await git.getOriginRemoteUrl();
+    if (origin) {
+      // 让“已配置 origin”的场景避免额外打扰
+      if (options?.allowSkipIfOriginExists) return origin;
+      // 同时把 origin 写回设置，方便新设备复用
+      await this.configService.set('git.remoteUrl', origin, vscode.ConfigurationTarget.Global);
+      return origin;
+    }
+
+    const configured = this.configService.get<string>('git.remoteUrl', '').trim();
+    if (configured) return configured;
+
+    const input = await vscode.window.showInputBox({
+      prompt: '请输入 Prompt 仓库的远程 URL（用于导入/拉取）',
+      placeHolder:
+        '例如：https://github.com/your-name/your-prompts.git 或 git@github.com:your-name/your-prompts.git',
+      ignoreFocusOut: true,
+    });
+
+    if (input === undefined) return null;
+    const url = input.trim();
+    if (!url) return null;
+
+    await this.configService.set('git.remoteUrl', url, vscode.ConfigurationTarget.Global);
+    return url;
   }
 
   /** 快速操作菜单（状态栏 / TreeView 顶部调用） */
@@ -463,6 +673,11 @@ export class CommandRegistrar {
         label: '🔄 刷新列表',
         description: '重新加载 Prompt 列表',
         action: 'refresh',
+      },
+      {
+        label: 'Git 拉取/导入',
+        description: '新设备从远端仓库拉取到本地 storagePath',
+        action: 'gitPull',
       },
       {
         label: '🔀 Git 同步',
@@ -499,6 +714,9 @@ export class CommandRegistrar {
       case 'refresh':
         await this.refreshView();
         break;
+      case 'gitPull':
+        await this.gitPull();
+        break;
       case 'git':
         await this.gitSync();
         break;
@@ -534,6 +752,36 @@ export class CommandRegistrar {
     );
 
     return picked?.prompt;
+  }
+
+  private isInside(root: string, target: string): boolean {
+    const rel = path.relative(path.resolve(root), path.resolve(target));
+    return !!rel && !rel.startsWith('..') && !path.isAbsolute(rel);
+  }
+
+  /**
+   * 为目标路径生成不冲突的唯一路径（必要时追加 -1/-2/...）
+   */
+  private async makeUniquePath(desiredPath: string, currentPath?: string): Promise<string> {
+    const dir = path.dirname(desiredPath);
+    const ext = path.extname(desiredPath) || '.md';
+    const base = path.basename(desiredPath, ext);
+
+    let candidate = desiredPath;
+    let counter = 1;
+
+    while (true) {
+      try {
+        await vscode.workspace.fs.stat(vscode.Uri.file(candidate));
+        if (currentPath && path.resolve(candidate) === path.resolve(currentPath)) {
+          return candidate;
+        }
+        candidate = path.join(dir, `${base}-${counter}${ext}`);
+        counter += 1;
+      } catch {
+        return candidate;
+      }
+    }
   }
 
   /** 更新 Markdown 文件的标题行（# ...） */
@@ -766,17 +1014,31 @@ export class CommandRegistrar {
               // 调用 AI 生成元信息
               const meta = await ai.generateMeta(prompt.content);
 
+              if (!meta.name && !meta.emoji) {
+                failureCount++;
+                failedPrompts.push(prompt.name || `Prompt_${i}`);
+                continue;
+              }
+
+              const nextName = meta.name?.trim() ? meta.name.trim() : (prompt.name || `Prompt_${i}`);
+              const nextEmoji = meta.emoji !== undefined ? meta.emoji : prompt.emoji;
+
               // 更新 Prompt
               const updated: Prompt = {
                 ...prompt,
-                name: meta.name || prompt.name || `Prompt_${i}`,
-                emoji: meta.emoji ?? prompt.emoji,
+                name: nextName,
+                emoji: nextEmoji,
                 updatedAt: new Date().toISOString(),
                 aiGeneratedMeta: true, // 标记为 AI 生成
               };
 
               // 保存到存储
               await this.storageService.update(updated);
+
+              // 如果有关联 Markdown 文件，同时更新其标题行
+              if (updated.sourceFile) {
+                await this.updateMarkdownHeader(updated.sourceFile, updated.name, updated.emoji);
+              }
               successCount++;
             } catch (error) {
               failureCount++;
@@ -906,14 +1168,26 @@ export class CommandRegistrar {
 
             try {
               const meta = await ai.generateMeta(prompt.content);
+              if (!meta.name && !meta.emoji) {
+                failureCount++;
+                continue;
+              }
+
+              const nextName = meta.name?.trim() ? meta.name.trim() : (prompt.name || `Prompt_${i}`);
+              const nextEmoji = meta.emoji !== undefined ? meta.emoji : prompt.emoji;
+
               const updated: Prompt = {
                 ...prompt,
-                name: meta.name || prompt.name || `Prompt_${i}`,
-                emoji: meta.emoji ?? prompt.emoji,
+                name: nextName,
+                emoji: nextEmoji,
                 updatedAt: new Date().toISOString(),
                 aiGeneratedMeta: true,
               };
               await this.storageService.update(updated);
+
+              if (updated.sourceFile) {
+                await this.updateMarkdownHeader(updated.sourceFile, updated.name, updated.emoji);
+              }
               successCount++;
             } catch (error) {
               failureCount++;
@@ -982,11 +1256,8 @@ export class CommandRegistrar {
    */
   private async optimizeMeta(context?: any): Promise<void> {
     try {
-      const prompt = context?.prompt;
-      if (!prompt) {
-        void vscode.window.showWarningMessage('未能获取 Prompt 信息。');
-        return;
-      }
+      const prompt = await this.ensurePromptSelected(context);
+      if (!prompt) return;
 
       // 创建 AI 服务实例
       const ai = new AIService(this.configService);
@@ -999,15 +1270,52 @@ export class CommandRegistrar {
           cancellable: false,
         },
         async () => {
+          const start = Date.now();
           try {
             // 调用 AI 生成元信息
             const meta = await ai.generateMeta(prompt.content);
 
+            if (!meta.name && !meta.emoji) {
+              const usage = new UsageLogService(this.configService);
+              await usage.record({
+                id: generateId(),
+                timestamp: new Date().toISOString(),
+                operation: 'meta',
+                promptId: prompt.id,
+                status: 'failed',
+                durationMs: Date.now() - start,
+                message: 'AI 未返回可用的标题/emoji（可能未配置或调用失败）',
+              });
+
+              void vscode.window.showInformationMessage('AI 未返回可用的唤醒词信息（可能未配置或调用失败）。');
+              return;
+            }
+
+            const nextName = meta.name?.trim() ? meta.name.trim() : prompt.name;
+            const nextEmoji = meta.emoji !== undefined ? meta.emoji : prompt.emoji;
+            const changed = nextName !== prompt.name || nextEmoji !== prompt.emoji;
+
+            if (!changed) {
+              const usage = new UsageLogService(this.configService);
+              await usage.record({
+                id: generateId(),
+                timestamp: new Date().toISOString(),
+                operation: 'meta',
+                promptId: prompt.id,
+                status: 'success',
+                durationMs: Date.now() - start,
+                message: 'AI 返回的唤醒词与当前一致，无需更新',
+              });
+
+              void vscode.window.showInformationMessage('唤醒词无需更新。');
+              return;
+            }
+
             // 更新 Prompt
             const updated: Prompt = {
               ...prompt,
-              name: meta.name || prompt.name,
-              emoji: meta.emoji ?? prompt.emoji,
+              name: nextName,
+              emoji: nextEmoji,
               updatedAt: new Date().toISOString(),
               aiGeneratedMeta: true,
             };
@@ -1015,14 +1323,40 @@ export class CommandRegistrar {
             // 保存到存储
             await this.storageService.update(updated);
 
+            // 同步更新 Markdown 标题
+            if (updated.sourceFile) {
+              await this.updateMarkdownHeader(updated.sourceFile, updated.name, updated.emoji);
+            }
+
             // 刷新树视图
             this.treeProvider.refresh();
+
+            const usage = new UsageLogService(this.configService);
+            await usage.record({
+              id: generateId(),
+              timestamp: new Date().toISOString(),
+              operation: 'meta',
+              promptId: updated.id,
+              status: 'success',
+              durationMs: Date.now() - start,
+            });
 
             // 显示成功提示
             void vscode.window.showInformationMessage(
               `✅ 已优化 "${updated.name}" 的唤醒词`
             );
           } catch (error) {
+            const usage = new UsageLogService(this.configService);
+            await usage.record({
+              id: generateId(),
+              timestamp: new Date().toISOString(),
+              operation: 'meta',
+              promptId: prompt.id,
+              status: 'failed',
+              durationMs: Date.now() - start,
+              message: error instanceof Error ? error.message : String(error),
+            });
+
             void vscode.window.showErrorMessage(
               `优化失败：${error instanceof Error ? error.message : String(error)}`
             );
@@ -1087,6 +1421,7 @@ export class CommandRegistrar {
       // 创建 AI 服务实例
       const ai = new AIService(this.configService);
       let successCount = 0;
+      let skippedCount = 0;
       let failureCount = 0;
       const failedPrompts: string[] = [];
 
@@ -1106,24 +1441,89 @@ export class CommandRegistrar {
             }
 
             const prompt = selectedPrompts[i];
+            const start = Date.now();
 
             try {
               // 调用 AI 生成元信息
               const meta = await ai.generateMeta(prompt.content);
 
+              if (!meta.name && !meta.emoji) {
+                const usage = new UsageLogService(this.configService);
+                await usage.record({
+                  id: generateId(),
+                  timestamp: new Date().toISOString(),
+                  operation: 'meta',
+                  promptId: prompt.id,
+                  status: 'failed',
+                  durationMs: Date.now() - start,
+                  message: 'AI 未返回可用的标题/emoji（可能未配置或调用失败）',
+                });
+
+                failureCount++;
+                failedPrompts.push(prompt.name || `Prompt_${i}`);
+                continue;
+              }
+
+              const nextName = meta.name?.trim() ? meta.name.trim() : prompt.name;
+              const nextEmoji = meta.emoji !== undefined ? meta.emoji : prompt.emoji;
+              const changed = nextName !== prompt.name || nextEmoji !== prompt.emoji;
+
+              if (!changed) {
+                const usage = new UsageLogService(this.configService);
+                await usage.record({
+                  id: generateId(),
+                  timestamp: new Date().toISOString(),
+                  operation: 'meta',
+                  promptId: prompt.id,
+                  status: 'success',
+                  durationMs: Date.now() - start,
+                  message: 'AI 返回的唤醒词与当前一致，无需更新',
+                });
+
+                skippedCount++;
+                continue;
+              }
+
               // 更新 Prompt
               const updated: Prompt = {
                 ...prompt,
-                name: meta.name || prompt.name,
-                emoji: meta.emoji ?? prompt.emoji,
+                name: nextName,
+                emoji: nextEmoji,
                 updatedAt: new Date().toISOString(),
                 aiGeneratedMeta: true,
               };
 
               // 保存到存储
               await this.storageService.update(updated);
+
+              // 同步更新 Markdown 标题
+              if (updated.sourceFile) {
+                await this.updateMarkdownHeader(updated.sourceFile, updated.name, updated.emoji);
+              }
+
+              const usage = new UsageLogService(this.configService);
+              await usage.record({
+                id: generateId(),
+                timestamp: new Date().toISOString(),
+                operation: 'meta',
+                promptId: updated.id,
+                status: 'success',
+                durationMs: Date.now() - start,
+              });
+
               successCount++;
             } catch (error) {
+              const usage = new UsageLogService(this.configService);
+              await usage.record({
+                id: generateId(),
+                timestamp: new Date().toISOString(),
+                operation: 'meta',
+                promptId: prompt.id,
+                status: 'failed',
+                durationMs: Date.now() - start,
+                message: error instanceof Error ? error.message : String(error),
+              });
+
               failureCount++;
               failedPrompts.push(prompt.name || `Prompt_${i}`);
               console.error(
@@ -1150,7 +1550,7 @@ export class CommandRegistrar {
       this.treeProvider.refresh();
 
       // 显示结果统计
-      let resultMessage = `优化完成！\n✅ 成功：${successCount} 个\n❌ 失败：${failureCount} 个`;
+      let resultMessage = `优化完成！\n✅ 成功：${successCount} 个\n⏭️ 无需更新：${skippedCount} 个\n❌ 失败：${failureCount} 个`;
       if (failedPrompts.length > 0 && failedPrompts.length <= 5) {
         resultMessage += `\n\n失败的 Prompt：\n${failedPrompts.map(p => `  • ${p}`).join('\n')}`;
       }

@@ -1,8 +1,8 @@
 {
   "name": "prompt-hub",
   "displayName": "Prompt Hub",
-  "description": "VSCode 插件，用于统一管理和组织 AI Prompt，支持本地存储、Git 同步、AI 辅助生成",
-  "version": "0.1.2",
+  "description": "VSCode 插件，用于统一管理和组织 AI Prompt，支持本地存储、Git 同步、AI 辅助生成（开发测试中）",
+  "version": "0.1.6",
   "engines": {
     "vscode": "^1.85.0"
   },
@@ -43,8 +43,19 @@
         "icon": "$(cloud-upload)"
       },
       {
+        "command": "promptHub.gitPull",
+        "title": "📥Git 拉取/导入",
+        "category": "Prompt Hub",
+        "icon": "$(cloud-download)"
+      },
+      {
         "command": "promptHub.searchPrompt",
         "title": "🔍 搜索 Prompt",
+        "category": "Prompt Hub"
+      },
+      {
+        "command": "promptHub.renamePromptFile",
+        "title": "📝 按标题重命名文件",
         "category": "Prompt Hub"
       },
       {
@@ -67,7 +78,7 @@
       },
       {
         "command": "promptHub.refreshView",
-        "title": "🔄 刷新视图",
+        "title": "🔄 刷新视图（重新加载存储并同步 Markdown）",
         "category": "Prompt Hub",
         "icon": "$(refresh)"
       },
@@ -95,23 +106,23 @@
       },
       {
         "command": "promptHub.showQuickPick",
-        "title": "📋 Prompt Hub: 快速访问",
+        "title": "📋 Prompt Hub: 打开菜单",
         "category": "Prompt Hub",
         "icon": "$(rocket)"
       },
       {
         "command": "promptHub.batchGenerateMeta",
-        "title": "批量生成标题和图标",
+        "title": "✨ 批量生成标题和图标",
         "category": "Prompt Hub"
       },
       {
         "command": "promptHub.batchGenerateMetaSelected",
-        "title": "批量生成标题和图标（选中）",
+        "title": "✨ 批量生成标题和图标（选中）",
         "category": "Prompt Hub"
       },
       {
         "command": "promptHub.optimizeMeta",
-        "title": "✨优化唤醒词",
+        "title": "✨ 优化唤醒词",
         "category": "Prompt Hub",
         "icon": "$(sparkle)"
       },
@@ -187,6 +198,11 @@
           "group": "navigation"
         },
         {
+          "command": "promptHub.gitPull",
+          "when": "view == promptHubView",
+          "group": "navigation"
+        },
+        {
           "command": "promptHub.gitSync",
           "when": "view == promptHubView",
           "group": "navigation"
@@ -229,6 +245,11 @@
           "group": "1_basic@2"
         },
         {
+          "command": "promptHub.renamePromptFile",
+          "when": "view == promptHubView && viewItem == prompt",
+          "group": "1_basic@3"
+        },
+        {
           "command": "promptHub.deletePrompt",
           "when": "view == promptHubView && viewItem == prompt",
           "group": "3_danger"
@@ -247,61 +268,85 @@
         "promptHub.storagePath": {
           "type": "string",
           "default": "~/.prompt-hub",
-          "description": "Prompt 存储根目录，支持绝对路径、~、环境变量、工作区变量",
+          "description": "Prompt 存储根目录（prompts.json 与 Markdown 文件都在此目录下）。支持绝对路径、~、环境变量、工作区变量。",
+          "markdownDescription": "Prompt 存储根目录（`prompts.json` 与 Markdown 文件都在此目录下）。\n\n支持的写法：\n- 绝对路径：`D:\\\\Prompts` / `/Users/me/prompts`\n- 用户目录：`~/.prompt-hub`\n- 工作区变量：`${workspaceFolder}/.prompts`\n- 环境变量：`${env:MY_DIR}` / `$MY_DIR` / `%MY_DIR%`（Windows）\n\n提示：若关闭 `promptHub.storage.autoCreate`，目录不存在会导致初始化失败。",
           "order": 1
         },
         "promptHub.storage.autoCreate": {
           "type": "boolean",
           "default": true,
-          "description": "目录不存在时是否自动创建",
+          "description": "存储目录不存在时是否自动创建（关闭后需手动创建，否则插件初始化会失败）。",
+          "markdownDescription": "存储目录不存在时是否自动创建。\n\n- `true`：目录不存在会自动创建\n- `false`：目录不存在会报错，适合希望严格控制目录创建的场景",
           "order": 2
         },
         "promptHub.markdown.filenameTemplate": {
           "type": "string",
           "default": "prompt-{timestamp}.md",
-          "description": "文件名模板，支持 {name}、{timestamp}、{date}、{emoji} 占位符",
+          "description": "新建 Prompt 文件的文件名模板（支持占位符）。",
+          "markdownDescription": "新建 Prompt 文件的文件名模板（用于“新建 Prompt 文件”等需要生成文件名的场景）。\n\n支持占位符：\n- `{name}`：Prompt 名称（可能为空）\n- `{emoji}`：emoji（可能为空）\n- `{date}`：日期（YYYYMMDD）\n- `{timestamp}`：时间戳（建议用于避免重名）\n\n示例：`{date}-{name}.md` → `20250110-我的提示.md`",
           "order": 11
         },
         "promptHub.markdown.askForFilename": {
           "type": "boolean",
           "default": false,
-          "description": "创建 Markdown Prompt 时是否询问文件名",
+          "description": "创建 Markdown Prompt 时是否弹窗询问文件名（关闭则直接使用文件名模板）。",
+          "markdownDescription": "创建 Markdown Prompt 时是否弹窗询问文件名。\n\n- `true`：每次创建都会让你确认/修改文件名\n- `false`：直接按 `promptHub.markdown.filenameTemplate` 生成文件名",
           "order": 12
+        },
+        "promptHub.markdown.autoRenameOnSave": {
+          "type": "boolean",
+          "default": true,
+          "description": "保存存储目录内的 Markdown 时，是否按标题自动重命名文件（可在 frontmatter 用 rename: false 禁用）。",
+          "markdownDescription": "保存存储目录内的 Markdown 文件时，是否根据标题（如 `# 😀 标题`）自动重命名文件。\n\n- 仅对 `promptHub.storagePath` 目录下的 `.md` 文件生效\n- 可在单个文件的 frontmatter 中设置 `rename: false` 禁用自动重命名\n\n提示：启用后，保存可能触发“文件重命名”，在 Git 中会表现为 rename 变更。",
+          "order": 13
         },
         "promptHub.selection.autoDetectPromptName": {
           "type": "boolean",
           "default": true,
-          "description": "从选区创建 Prompt 时自动检测 # prompt: 标记",
+          "description": "从选区创建 Prompt 时，自动识别首行的名称标记（# prompt: 或 Markdown 标题）。",
+          "markdownDescription": "从选区创建 Prompt 时，自动识别首行的名称标记并预填充名称/emoji。\n\n支持两种首行格式：\n- 专用标记：`# prompt: 😀 名称`\n- Markdown H1：`# 😀 名称`\n\n未匹配到标记时：不会提取名称，内容保持为原选区文本。",
           "order": 20
         },
         "promptHub.selection.removePromptMarker": {
           "type": "boolean",
           "default": true,
-          "description": "检测到标记后，是否从内容中移除标记",
+          "description": "从选区创建 Prompt 时，识别到首行标记后是否从正文中移除该行（默认移除）。",
+          "markdownDescription": "从选区创建 Prompt 时，若识别到首行标记（`# prompt:` 或 `# 标题`），在提取名称后是否从正文中移除该标记行。\n\n- `true`：Prompt 正文从第二行开始\n- `false`：Prompt 正文保留原始第一行（标记行也会进入 Prompt 内容）\n\n仅在 `promptHub.selection.autoDetectPromptName` 启用且首行成功匹配时生效。",
           "order": 21
         },
         "promptHub.git.enableSync": {
           "type": "boolean",
           "default": false,
-          "description": "是否启用 Git 同步功能",
+          "description": "是否启用与远端的 Git 同步（pull/push）。关闭时不会进行远端同步。",
+          "markdownDescription": "是否启用与远端的 Git 同步（pull/push）。\n\n- `true`：同步时会执行 `pull --rebase` + `push`\n- `false`：不会执行远端同步（避免网络操作）；仍可能在本地执行 `git add`/`git commit`（取决于触发的命令/流程）",
           "order": 30
+        },
+        "promptHub.git.remoteUrl": {
+          "type": "string",
+          "default": "",
+          "description": "远程仓库 URL（用于新设备导入/首次配置 origin；留空则使用已有 origin）。",
+          "markdownDescription": "远程仓库 URL（用于新设备导入、或本地尚未配置 `origin` 时补齐远端）。\n\n典型场景：\n- 新电脑首次使用：本地 `storagePath` 还不是仓库 → 通过该 URL 导入远端内容\n- 已有仓库：若已存在 `origin`，可留空\n\n示例：`https://github.com/you/prompts.git` 或 `git@github.com:you/prompts.git`",
+          "order": 30.5
         },
         "promptHub.git.autoPullOnStartup": {
           "type": "boolean",
           "default": false,
-          "description": "VSCode 启动时自动拉取远程更新",
+          "description": "VSCode 启动时自动拉取/导入远端更新（可能修改本地文件）。",
+          "markdownDescription": "VSCode 启动时自动拉取/导入远端更新。\n\n- 若本地是仓库：执行 `git pull --rebase`\n- 若本地不是仓库：会尝试使用 `promptHub.git.remoteUrl` 导入；为避免冲突，必要时会先备份当前目录文件\n\n提示：该操作会修改 `promptHub.storagePath` 下的文件，建议在了解行为后再开启。",
           "order": 31
         },
         "promptHub.git.commitMessageTemplate": {
           "type": "string",
           "default": "chore: sync prompts",
-          "description": "提交信息模板，支持 {datetime} 占位符",
+          "description": "Git 自动提交/同步时使用的提交信息模板（支持 {datetime} 占位符）。",
+          "markdownDescription": "Git 自动提交/同步时使用的提交信息模板。\n\n- 支持占位符 `{datetime}`（会替换为当前时间）\n- 示例：`chore: sync prompts ({datetime})`",
           "order": 32
         },
         "promptHub.ui.showEmojiPicker": {
           "type": "boolean",
           "default": true,
-          "description": "创建 Prompt 时显示 emoji 选择器",
+          "description": "创建 Prompt 时是否显示 emoji 选择器（关闭后可稍后再编辑补充）。",
+          "markdownDescription": "创建 Prompt 时是否显示 emoji 选择器。\n\n- `true`：创建流程中会提示选择 emoji\n- `false`：跳过 emoji 选择步骤，后续仍可编辑 Prompt 补充 emoji",
           "order": 50
         },
         "promptHub.ui.sortBy": {
@@ -319,13 +364,15 @@
             "创建时间",
             "使用次数"
           ],
-          "description": "排序方式",
+          "description": "TreeView 列表排序方式（影响侧边栏 Prompt 列表显示顺序）。",
+          "markdownDescription": "侧边栏 Prompt 列表的排序方式。\n\n- `recent`：按最近使用/更新时间优先\n- `name`：按名称字母/拼音顺序（具体取决于系统排序）\n- `created`：按创建时间\n- `usage`：按使用次数",
           "order": 51
         },
         "promptHub.git.autoSyncOnSave": {
           "type": "boolean",
           "default": true,
-          "description": "保存 Prompt Markdown 文件后，是否自动触发 Git 同步（在延迟时间后执行）",
+          "description": "保存存储目录内的 Markdown 后，是否自动触发 Git 同步（带防抖延迟）。",
+          "markdownDescription": "保存 `promptHub.storagePath` 目录内的 Markdown 文件后，是否自动触发 Git 同步。\n\n- 仅对存储目录内的 `.md` 文件生效\n- 多次保存会重置计时器（防抖），延迟由 `promptHub.git.autoSyncDelaySeconds` 控制\n- 需要开启 `promptHub.git.enableSync` 才会执行同步",
           "order": 33
         },
         "promptHub.git.autoSyncDelaySeconds": {
@@ -333,13 +380,22 @@
           "default": 60,
           "minimum": 5,
           "maximum": 3600,
-          "description": "自动 Git 同步延迟时间（秒）。例如 60 表示保存后约 1 分钟执行同步",
+          "description": "自动 Git 同步的防抖延迟（秒）。多次保存会不断重置计时器。",
+          "markdownDescription": "自动 Git 同步的防抖延迟（单位：秒）。\n\n示例：设为 `60` 时，保存后约 60 秒触发一次同步；若这 60 秒内再次保存，则重新计时。",
           "order": 34
+        },
+        "promptHub.git.debugLog": {
+          "type": "boolean",
+          "default": false,
+          "description": "开启 Git 诊断日志（用于排查拉取/导入/同步问题）。",
+          "markdownDescription": "开启 Git 诊断日志。\n\n适合用于排查：\n- 拉取/导入后文件未出现\n- 仓库状态异常、同步失败\n\n提示：开启后会输出更多日志到控制台/输出面板，可能包含仓库路径等信息。",
+          "order": 35
         },
         "promptHub.statusBar.enable": {
           "type": "boolean",
           "default": true,
-          "description": "是否显示状态栏图标",
+          "description": "是否显示状态栏图标/提示（用于快捷入口与异常提示）。",
+          "markdownDescription": "是否显示状态栏图标/提示。\n\n- `true`：显示状态栏入口，异常时也会以状态栏提示\n- `false`：隐藏状态栏相关 UI（不影响核心功能）",
           "order": 52
         },
         "promptHub.ai.provider": {
@@ -367,19 +423,22 @@
             "本地 Claude Code CLI（推荐）",
             "本地 Codex"
           ],
-          "description": "AI 提供商标识（配置向导会自动写入）",
+          "description": "AI 提供商（用于“生成标题/emoji”“优化内容”等 AI 功能；建议通过配置向导设置）。",
+          "markdownDescription": "AI 提供商（用于“生成标题/emoji”“优化内容”等 AI 功能）。\n\n建议：通过命令“Prompt Hub: 配置向导”完成配置，API Key 会安全存储在 VSCode SecretStorage 中（不在 settings.json 里明文保存）。\n\n本地模式：选择 `local-claude` / `local-codex` 时，请同时配置本地 CLI 路径相关设置。",
           "order": 61
         },
         "promptHub.ai.model": {
           "type": "string",
           "default": "",
-          "description": "AI 模型名称（如 gpt-4o、qwen-turbo），配置向导会自动写入",
+          "description": "AI 模型名称（如 gpt-4o、qwen-turbo；不同提供商可用模型不同）。",
+          "markdownDescription": "AI 模型名称（不同提供商支持的模型名称不同）。\n\n示例：\n- OpenAI：`gpt-4o` / `gpt-4.1-mini`\n- 通义千问：`qwen-turbo`\n\n建议通过配置向导填写，避免模型名不匹配导致调用失败。",
           "order": 62
         },
         "promptHub.ai.baseUrl": {
           "type": "string",
           "default": "https://api.openai.com/v1",
-          "description": "AI API Base URL，自定义 Provider 或 Azure 使用时可修改",
+          "description": "AI API Base URL（用于 Azure 或自定义 Provider；默认 OpenAI 官方地址）。",
+          "markdownDescription": "AI API Base URL。\n\n- OpenAI：通常保持默认 `https://api.openai.com/v1`\n- Azure / 自定义 Provider：按你的网关/服务地址填写\n\n提示：不同提供商的 Base URL 形态可能不同，请以你的服务文档为准。",
           "order": 63
         },
         "promptHub.ai.batchDelayMs": {
@@ -387,25 +446,38 @@
           "default": 500,
           "minimum": 100,
           "maximum": 10000,
-          "description": "批量生成时两个 API 调用之间的延迟（毫秒），避免速率限制",
+          "description": "批量 AI 调用的间隔延迟（毫秒），用于降低触发速率限制的概率。",
+          "markdownDescription": "批量 AI 调用的间隔延迟（单位：毫秒）。\n\n当你使用“批量生成元信息/批量优化”等功能时，会在两次请求之间等待一段时间，以降低触发 429/限流的概率。",
           "order": 60
         },
         "promptHub.local.claudePath": {
           "type": "string",
           "default": "",
-          "description": "本地 Claude Code CLI 路径（留空自动检测，支持 ~ 和环境变量）",
+          "description": "本地 Claude Code CLI 可执行文件路径（留空自动检测；仅在 provider=local-claude 时使用）。",
+          "markdownDescription": "本地 Claude Code CLI 可执行文件路径（仅在 `promptHub.ai.provider=local-claude` 时使用）。\n\n- 留空：自动检测（环境变量 `CLAUDE_BIN` / `PATH` / 常见安装目录等）\n- 手动指定：填写可执行文件完整路径，例如 `C:\\\\Tools\\\\claude.exe`\n\n支持 `~` 与环境变量。",
           "order": 71
+        },
+        "promptHub.local.claudeTimeoutMs": {
+          "type": "number",
+          "default": 120000,
+          "minimum": 5000,
+          "maximum": 600000,
+          "description": "本地 Claude Code CLI 调用超时（毫秒；仅在 provider=local-claude 时使用）。",
+          "markdownDescription": "本地 Claude Code CLI 调用超时（单位：毫秒，仅在 `promptHub.ai.provider=local-claude` 时使用）。\n\n提示：首次登录、网络较慢或模型响应较慢时，可适当调大。",
+          "order": 74
         },
         "promptHub.local.codexPath": {
           "type": "string",
           "default": "",
-          "description": "本地 Codex 可执行文件路径（留空自动检测，支持 ~ 和环境变量）",
+          "description": "本地 Codex CLI 可执行文件路径（留空自动检测；仅在 provider=local-codex 时使用）。",
+          "markdownDescription": "本地 Codex CLI 可执行文件路径（仅在 `promptHub.ai.provider=local-codex` 时使用）。\n\n- 留空：自动检测（`PATH` / 常见安装目录等）\n- 手动指定：填写可执行文件完整路径\n\n支持 `~` 与环境变量。",
           "order": 72
         },
         "promptHub.local.codexModel": {
           "type": "string",
-          "default": "claude-sonnet-4.5",
-          "description": "Codex 使用的模型名称",
+          "default": "",
+          "description": "本地 Codex 使用的模型名称（留空则使用 Codex CLI 默认模型；仅在 provider=local-codex 时使用）。",
+          "markdownDescription": "本地 Codex 使用的模型名称（仅在 `promptHub.ai.provider=local-codex` 时使用）。\n\n- 留空：使用 Codex CLI 的默认模型\n- 填写：覆盖默认模型（以你本地 Codex CLI 支持的模型为准）",
           "order": 73
         }
       }
@@ -418,6 +490,8 @@
     "pretest": "npm run compile && npm run lint",
     "lint": "eslint src --ext ts",
     "test": "node ./out/test/runTest.js",
+    "ai:doctor": "node ./scripts/ai-doctor.js",
+    "ai:doctor:probe": "node ./scripts/ai-doctor.js --probe",
     "package": "vsce package",
     "postinstall": "npm run compile || echo 'compile skipped'"
   },

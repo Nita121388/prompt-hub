@@ -26,6 +26,10 @@ export class PromptStorageService {
     this.storageFile = path.join(this.storagePath, 'prompts.json');
   }
 
+  private get gitDebugLogEnabled(): boolean {
+    return this.configService.get<boolean>('git.debugLog', false);
+  }
+
   /**
    * 初始化存储服务
    */
@@ -156,10 +160,44 @@ export class PromptStorageService {
   }
 
   /**
+   * 替换 Prompt 的 ID（用于修复 Markdown frontmatter 与 JSON 不一致的历史数据）
+   * - 仅在 newId 未被占用时允许替换
+   * - 会写回 prompts.json 并触发变更事件
+   */
+  async replaceId(oldId: string, newId: string): Promise<void> {
+    if (!oldId || !newId || oldId === newId) return;
+
+    const existingNew = this.getById(newId);
+    if (existingNew) {
+      throw new Error(`无法替换 Prompt ID：新ID "${newId}" 已存在`);
+    }
+
+    const index = this.prompts.findIndex((p) => p.id === oldId);
+    if (index === -1) {
+      throw new Error(`无法替换 Prompt ID：旧ID "${oldId}" 不存在`);
+    }
+
+    const current = this.prompts[index];
+    this.prompts[index] = {
+      ...current,
+      id: newId,
+      updatedAt: new Date().toISOString(),
+    };
+
+    await this.save();
+  }
+
+  /**
    * 添加新 Prompt
    */
   async add(prompt: Prompt): Promise<void> {
     console.log('[PromptStorageService] 添加新Prompt - id:', prompt.id, ', name:', prompt.name);
+
+    // 检查 ID 是否重复（理论上不应发生，防御性处理）
+    if (this.prompts.some((p) => p.id === prompt.id)) {
+      console.log('[PromptStorageService] Prompt ID重复:', prompt.id);
+      throw new Error(`Prompt ID "${prompt.id}" 已存在`);
+    }
 
     // 检查名称是否重复
     if (this.prompts.some((p) => p.name === prompt.name)) {
@@ -227,8 +265,29 @@ export class PromptStorageService {
         await fs.unlink(removed.sourceFile);
         console.log('[PromptStorageService] Markdown文件已删除');
       } catch (err) {
+        const code = (err as any)?.code as string | undefined;
         console.error('[PromptStorageService] 删除Markdown文件失败:', err);
-        // 即使文件删除失败，也继续删除 Prompt 数据
+
+        // 兜底：如果文件路径已被外部工具（如 Obsidian）重命名导致找不到，则按 id 扫描存储目录定位真实文件并删除
+        if (code === 'ENOENT') {
+          try {
+            const actual = await this.findMarkdownFileById(removed.id);
+            if (actual && actual !== removed.sourceFile) {
+              console.warn(
+                '[PromptStorageService] sourceFile 不存在，已按 id 定位到实际文件，尝试删除:',
+                actual
+              );
+              await fs.unlink(actual);
+              console.log('[PromptStorageService] 兜底删除成功:', actual);
+            } else if (!actual) {
+              console.warn(
+                '[PromptStorageService] sourceFile 不存在，且未在存储目录中按 id 找到对应 Markdown 文件，已跳过文件删除'
+              );
+            }
+          } catch (fallbackErr) {
+            console.error('[PromptStorageService] 兜底按 id 删除文件失败:', fallbackErr);
+          }
+        }
       }
     }
 
@@ -301,6 +360,47 @@ export class PromptStorageService {
     return imported;
   }
 
+  /**
+   * 在存储目录中按 Prompt id 定位 Markdown 文件（用于处理外部重命名导致的 sourceFile 失效）
+   */
+  private async findMarkdownFileById(id: string): Promise<string | undefined> {
+    const files = await this.collectMarkdownFiles(this.storagePath);
+    if (!files.length) return undefined;
+
+    // 优先基于 frontmatter 中的 id: 行进行快速匹配，避免完整解析
+    for (const file of files) {
+      try {
+        const text = await fs.readFile(file, 'utf-8');
+        const fm = this.extractFrontmatter(text);
+        if (!fm) continue;
+
+        const m = fm.match(/^id\s*:\s*(.+)\s*$/im);
+        const value = m?.[1]?.trim();
+        if (value && value.replace(/^['"]|['"]$/g, '') === id) {
+          return file;
+        }
+      } catch {
+        // 忽略单文件读取/解析失败，继续扫描
+      }
+    }
+
+    return undefined;
+  }
+
+  private extractFrontmatter(text: string): string | undefined {
+    const lines = text.split(/\r?\n/);
+    if (!lines.length) return undefined;
+    if (lines[0].trim() !== '---') return undefined;
+
+    for (let i = 1; i < lines.length; i += 1) {
+      if (lines[i].trim() === '---') {
+        return lines.slice(1, i).join('\n');
+      }
+    }
+
+    return undefined;
+  }
+
   /** 递归收集存储目录下的 Markdown 文件，忽略常见无关目录 */
   private async collectMarkdownFiles(root: string): Promise<string[]> {
     const result: string[] = [];
@@ -362,9 +462,23 @@ export class PromptStorageService {
    * 刷新（重新加载）
    */
   async refresh(): Promise<void> {
+    if (this.gitDebugLogEnabled) {
+      console.log(
+        `[PromptStorageService][诊断] refresh() storagePath=${this.storagePath} storageFile=${this.storageFile}`
+      );
+      console.log(`[PromptStorageService][诊断] refresh() before prompts=${this.prompts.length}`);
+    }
+
     await this.load();
     const imported = await this.importMarkdownPrompts();
     const pruned = await this.pruneMissingSourceFiles();
+
+    if (this.gitDebugLogEnabled) {
+      console.log(
+        `[PromptStorageService][诊断] refresh() loaded=${this.prompts.length} imported=${imported} pruned=${pruned}`
+      );
+    }
+
     if (imported > 0 || pruned > 0) {
       await this.save();
     } else {

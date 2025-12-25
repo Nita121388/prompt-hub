@@ -90,8 +90,14 @@ export async function activate(context: vscode.ExtensionContext) {
       setTimeout(() => {
         gitSyncService
           .pull()
-          .then(() => {
+          .then(async () => {
             console.log('[Extension] Git auto pull on startup completed');
+            try {
+              await storageService.refresh();
+              treeProvider.refresh();
+            } catch (error) {
+              console.error('[Extension] Git auto pull 后刷新失败', error);
+            }
           })
           .catch((error) => {
             console.error('[Extension] Git auto pull on startup failed', error);

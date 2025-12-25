@@ -13,6 +13,8 @@ import { MarkdownPromptParser } from '../utils/MarkdownPromptParser';
  * - 将内容同步到 JSON 存储（新增或更新）
  */
 export class MarkdownMirrorService {
+  private readonly renaming = new Set<string>();
+
   constructor(
     private readonly storage: PromptStorageService,
     private readonly config: ConfigurationService
@@ -58,6 +60,11 @@ export class MarkdownMirrorService {
 
   private async onDidSave(doc: vscode.TextDocument): Promise<void> {
     console.log('[MarkdownMirrorService] 检测到文件保存事件:', doc.uri.fsPath);
+
+    if (this.renaming.has(doc.uri.fsPath)) {
+      console.log('[MarkdownMirrorService] 文件处于重命名过程中，跳过本次保存处理:', doc.uri.fsPath);
+      return;
+    }
 
     const enable = this.config.get<boolean>('markdown.enableMirror', true);
     console.log('[MarkdownMirrorService] Markdown镜像是否启用:', enable);
@@ -106,18 +113,39 @@ export class MarkdownMirrorService {
     const emoji = parsed.emoji;
     console.log('[MarkdownMirrorService] 最终数据 - name:', name, ', emoji:', emoji, ', content长度:', content.length);
 
-    // 优先根据内嵌 ID 或 sourceFile 匹配已有 Prompt
+    const autoRenameOnSave = this.config.get<boolean>('markdown.autoRenameOnSave', true);
+    const allowRename = autoRenameOnSave && parsed.rename !== false;
+
+    // 优先根据内嵌 ID 匹配；若 ID 不存在或未写入 JSON（历史版本/异常情况），再回退按 sourceFile 匹配
     const all = this.storage.list();
     const idInFile = parsed.id || this.extractIdMarker(text);
     console.log('[MarkdownMirrorService] 提取的ID标记:', idInFile);
     console.log('[MarkdownMirrorService] 当前存储中的Prompt数量:', all.length);
 
-    const existing = idInFile
-      ? this.storage.getById(idInFile)
-      : all.find((p) => p.sourceFile === filePath);
+    let existing = idInFile ? this.storage.getById(idInFile) : undefined;
+    if (!existing) {
+      existing = all.find((p) => p.sourceFile === filePath);
+    }
     console.log('[MarkdownMirrorService] 查找已存在的Prompt:', existing ? `找到 (id: ${existing.id})` : '未找到');
 
     if (existing) {
+      // 若文件内的 id 与 JSON 不一致，且新 id 未被占用，则自动修复（让后续保存都能通过 id 直接命中）
+      if (idInFile && existing.id !== idInFile && !this.storage.getById(idInFile)) {
+        console.log(
+          '[MarkdownMirrorService] 检测到ID不一致，尝试修复 - old:',
+          existing.id,
+          ', new:',
+          idInFile
+        );
+        try {
+          await this.storage.replaceId(existing.id, idInFile);
+          existing = this.storage.getById(idInFile) ?? existing;
+          console.log('[MarkdownMirrorService] ID修复成功，当前ID:', existing.id);
+        } catch (err) {
+          console.error('[MarkdownMirrorService] ID修复失败，继续使用旧ID进行更新:', err);
+        }
+      }
+
       console.log('[MarkdownMirrorService] 更新现有Prompt - id:', existing.id, ', 原name:', existing.name, ', 新name:', name);
       const updated: Prompt = {
         ...existing,
@@ -131,8 +159,9 @@ export class MarkdownMirrorService {
       await this.storage.update(updated);
       console.log('[MarkdownMirrorService] Prompt更新成功');
 
-      // 如果启用了文件名与标题关联，检查是否需要重命名文件
-      await this.renameFileIfNeeded(filePath, name, emoji);
+      if (allowRename) {
+        await this.renameFileByTitleIfNeeded(updated.id, filePath, updated.name, updated.emoji);
+      }
 
       vscode.window.showInformationMessage(`已更新 Prompt：${name}`);
       return;
@@ -140,7 +169,13 @@ export class MarkdownMirrorService {
 
     // 新建 Prompt，处理可能的重名
     console.log('[MarkdownMirrorService] 创建新Prompt');
-    const base: Omit<Prompt, 'id'> = {
+
+    // 新建时优先使用文件内的 id（frontmatter/注释），确保后续保存可稳定命中同一条 Prompt
+    const desiredId =
+      idInFile && !this.storage.getById(idInFile) ? idInFile : generateId();
+
+    const base: Prompt = {
+      id: desiredId,
       name,
       emoji,
       content,
@@ -150,8 +185,13 @@ export class MarkdownMirrorService {
       tags: parsed.tags ?? [],
     };
 
-    await this.addWithUniqueName(base);
+    const created = await this.addWithUniqueName(base);
     console.log('[MarkdownMirrorService] 新Prompt创建成功');
+
+    if (allowRename) {
+      await this.renameFileByTitleIfNeeded(created.id, filePath, created.name, created.emoji);
+    }
+
     vscode.window.showInformationMessage(`已创建 Prompt：${name}`);
   }
 
@@ -221,19 +261,82 @@ export class MarkdownMirrorService {
     return name.replace(/[\\/:*?"<>|]/g, '-').replace(/\s+/g, ' ').trim();
   }
 
-  private async addWithUniqueName(base: Omit<Prompt, 'id'>): Promise<void> {
+  private async addWithUniqueName(base: Prompt): Promise<Prompt> {
     let candidate = base.name;
     let i = 1;
     while (true) {
       try {
-        await this.storage.add({ id: generateId(), ...base, name: candidate });
-        return;
+        const created = { ...base, name: candidate };
+        await this.storage.add(created);
+        return created;
       } catch (e) {
-        // 若名称冲突，换下一个名称
+        // 若名称冲突，换下一个名称（保持 id 不变，避免后续与文件内 id 再次不一致）
         candidate = `${base.name}-${i}`;
         i += 1;
         if (i > 50) throw e; // 保护性退出
       }
+    }
+  }
+
+  private async renameFileByTitleIfNeeded(
+    promptId: string,
+    currentPath: string,
+    name: string,
+    emoji?: string
+  ): Promise<void> {
+    const sanitizedName = this.sanitize(name);
+    if (!sanitizedName || sanitizedName === '在此填写标题') {
+      console.log('[MarkdownMirrorService] 标题为空或为默认占位符，跳过重命名');
+      return;
+    }
+
+    const dir = path.dirname(currentPath);
+    const emojiPart = emoji ? `${emoji}-` : '';
+    const newFilename = `${emojiPart}${sanitizedName}.md`;
+    let newPath = path.join(dir, newFilename);
+
+    if (path.resolve(newPath) === path.resolve(currentPath)) {
+      return;
+    }
+
+    // 确保新文件名不冲突
+    let counter = 1;
+    while (true) {
+      try {
+        await fs.access(newPath);
+        newPath = path.join(dir, `${emojiPart}${sanitizedName}-${counter}.md`);
+        counter += 1;
+      } catch {
+        break;
+      }
+    }
+
+    try {
+      console.log('[MarkdownMirrorService] 开始重命名文件:', currentPath, '->', newPath);
+      this.renaming.add(currentPath);
+      await fs.rename(currentPath, newPath);
+      console.log('[MarkdownMirrorService] 文件重命名成功');
+
+      const latest = this.storage.getById(promptId);
+      if (latest) {
+        await this.storage.update({
+          ...latest,
+          sourceFile: newPath,
+          updatedAt: new Date().toISOString(),
+        });
+      }
+
+      const oldDoc = vscode.workspace.textDocuments.find((d) => d.uri.fsPath === currentPath);
+      if (oldDoc) {
+        await vscode.window.showTextDocument(oldDoc);
+        await vscode.commands.executeCommand('workbench.action.closeActiveEditor');
+        const newDoc = await vscode.workspace.openTextDocument(newPath);
+        await vscode.window.showTextDocument(newDoc, { preview: false });
+      }
+    } catch (err) {
+      console.error('[MarkdownMirrorService] 文件重命名失败:', err);
+    } finally {
+      this.renaming.delete(currentPath);
     }
   }
 
@@ -242,85 +345,4 @@ export class MarkdownMirrorService {
     return !!rel && !rel.startsWith('..') && !path.isAbsolute(rel);
   }
 
-  /**
-   * 根据标题重命名文件（如果需要）
-   * 仅当文件名是时间戳格式时才重命名
-   */
-  private async renameFileIfNeeded(
-    currentPath: string,
-    name: string,
-    emoji?: string
-  ): Promise<void> {
-    const currentFilename = path.basename(currentPath, '.md');
-
-    // 检查当前文件名是否是时间戳格式 (prompt-YYYYMMDD-HHMMSS 或类似格式)
-    const timestampPattern = /^prompt-\d{8}-\d{6}(-\d+)?$/;
-    if (!timestampPattern.test(currentFilename)) {
-      // 文件名已经被用户自定义过，不再自动重命名
-      console.log('[MarkdownMirrorService] 文件名非时间戳格式，跳过重命名');
-      return;
-    }
-
-    // 生成新文件名
-    const sanitizedName = this.sanitize(name);
-    const emojiPart = emoji ? `${emoji}-` : '';
-    const newFilename = `${emojiPart}${sanitizedName}.md`;
-    const dir = path.dirname(currentPath);
-    let newPath = path.join(dir, newFilename);
-
-    console.log('[MarkdownMirrorService] 准备重命名文件:', currentPath, '->', newPath);
-
-    // 确保新文件名不冲突
-    let counter = 1;
-    while (true) {
-      try {
-        await fs.access(newPath);
-        // 文件已存在，如果是同一个文件则跳过
-        if (path.resolve(newPath) === path.resolve(currentPath)) {
-          console.log('[MarkdownMirrorService] 新旧文件名相同，跳过重命名');
-          return;
-        }
-        // 否则生成带编号的文件名
-        newPath = path.join(dir, `${emojiPart}${sanitizedName}-${counter}.md`);
-        counter++;
-      } catch {
-        // 文件不存在，可以使用
-        break;
-      }
-    }
-
-    // 重命名文件
-    try {
-      console.log('[MarkdownMirrorService] 开始重命名文件');
-      await fs.rename(currentPath, newPath);
-      console.log('[MarkdownMirrorService] 文件重命名成功');
-
-      // 更新存储中的 sourceFile 路径（不触发save，避免循环）
-      const all = this.storage.list();
-      const prompt = all.find((p) => p.sourceFile === currentPath);
-      if (prompt) {
-        console.log('[MarkdownMirrorService] 更新存储中的sourceFile路径');
-        // 直接修改，不调用update以避免触发事件
-        prompt.sourceFile = newPath;
-        // 手动保存，但不触发事件
-        await this.storage['save']();
-        console.log('[MarkdownMirrorService] sourceFile路径已更新');
-      }
-
-      // 关闭旧文档并打开新文档
-      const oldDoc = vscode.workspace.textDocuments.find(
-        (doc) => doc.uri.fsPath === currentPath
-      );
-      if (oldDoc) {
-        console.log('[MarkdownMirrorService] 切换编辑器到新文件');
-        await vscode.window.showTextDocument(oldDoc);
-        await vscode.commands.executeCommand('workbench.action.closeActiveEditor');
-        const newDoc = await vscode.workspace.openTextDocument(newPath);
-        await vscode.window.showTextDocument(newDoc, { preview: false });
-        console.log('[MarkdownMirrorService] 编辑器已切换');
-      }
-    } catch (err) {
-      console.error('[MarkdownMirrorService] 重命名文件失败:', err);
-    }
-  }
 }

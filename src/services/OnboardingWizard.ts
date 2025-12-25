@@ -5,6 +5,7 @@ import * as os from 'os';
 import * as cp from 'child_process';
 import { OnboardingState } from '../types/Prompt';
 import { ConfigurationService } from './ConfigurationService';
+import { GitSyncService } from './GitSyncService';
 
 const LOG_PREFIX = '[OnboardingWizard]';
 
@@ -95,19 +96,24 @@ export class OnboardingWizard {
       '  · 配置 AI Provider（可选）',
     ].join('\n');
 
+    const startItem: vscode.MessageItem = { title: '开始配置' };
+    const defaultsItem: vscode.MessageItem = { title: '使用默认配置' };
+    const laterItem: vscode.MessageItem = { title: '以后再说', isCloseAffordance: true };
+
     const result = await vscode.window.showInformationMessage(
       message,
       { modal: true },
-      '开始配置',
-      '使用默认配置',
-      '以后再说'
+      startItem,
+      defaultsItem,
+      laterItem
     );
 
     console.log(LOG_PREFIX, 'showWelcome() 用户选择:', result);
 
-    if (result === '开始配置') return 'start';
-    if (result === '使用默认配置') return 'defaults';
-    if (result === '以后再说') return 'later';
+    const selectedTitle = result?.title;
+    if (selectedTitle === '开始配置') return 'start';
+    if (selectedTitle === '使用默认配置') return 'defaults';
+    if (selectedTitle === '以后再说') return 'later';
     return undefined;
   }
 
@@ -126,19 +132,24 @@ export class OnboardingWizard {
       '  · 配置 AI Provider（可选）',
     ].join('\n');
 
+    const startItem: vscode.MessageItem = { title: '开始配置' };
+    const defaultsItem: vscode.MessageItem = { title: '使用默认配置' };
+    const laterItem: vscode.MessageItem = { title: '以后再说', isCloseAffordance: true };
+
     const result = await vscode.window.showInformationMessage(
       message,
       { modal: true },
-      '开始配置',
-      '使用默认配置',
-      '以后再说'
+      startItem,
+      defaultsItem,
+      laterItem
     );
 
     console.log(LOG_PREFIX, 'showWelcomeV2() 用户选择:', result);
 
-    if (result === '开始配置') return 'start';
-    if (result === '使用默认配置') return 'defaults';
-    if (result === '以后再说') return 'later';
+    const selectedTitle = result?.title;
+    if (selectedTitle === '开始配置') return 'start';
+    if (selectedTitle === '使用默认配置') return 'defaults';
+    if (selectedTitle === '以后再说') return 'later';
     return undefined;
   }
 
@@ -149,7 +160,7 @@ export class OnboardingWizard {
     console.log(LOG_PREFIX, 'runFlow() 开始，当前 state =', this.state);
 
     try {
-      let currentStep: 2 | 3 | 4 = 2;
+      let currentStep: 2 | 3 | 4 | 5 = 2;
       let finished = false;
 
       // 当前存储路径（如果之前配置过就复用）
@@ -202,6 +213,15 @@ export class OnboardingWizard {
             vscode.ConfigurationTarget.Global
           );
 
+          // 记录远程 URL，便于新设备一键“拉取/导入”
+          if (this.state.gitRemoteUrl && this.state.gitRemoteUrl.trim()) {
+            await vscode.workspace.getConfiguration('promptHub').update(
+              'git.remoteUrl',
+              this.state.gitRemoteUrl.trim(),
+              vscode.ConfigurationTarget.Global
+            );
+          }
+
           this.state.step = 3;
           await this.saveState();
 
@@ -213,7 +233,8 @@ export class OnboardingWizard {
             this.state.gitRemoteUrl
           );
           currentStep = 4;
-        } else {
+        } else if (currentStep === 4) {
+          // 步骤 4：AI Provider
           const aiResult = await this.configureAI();
           console.log(LOG_PREFIX, 'configureAI 返回:', aiResult);
 
@@ -233,19 +254,34 @@ export class OnboardingWizard {
           this.state.step = 4;
           await this.saveState();
 
+          console.log(LOG_PREFIX, '步骤 4 完成，aiProvider =', this.state.aiProvider);
+
+          // 如果选择了 local-claude，且是 Windows，检查 Git Bash
+          if (aiResult.type === 'next' && aiResult.provider === 'local-claude' && process.platform === 'win32') {
+            currentStep = 5;
+          } else {
+            finished = true;
+          }
+        } else {
+          // 步骤 5：Git Bash 检测（仅 Windows + local-claude）
+          const gitBashResult = await this.checkGitBash();
+          console.log(LOG_PREFIX, 'checkGitBash 返回:', gitBashResult);
+
+          if (gitBashResult.type === 'back') {
+            currentStep = 4;
+            continue;
+          }
+
+          this.state.step = 5;
+          await this.saveState();
+
           finished = true;
         }
       }
 
-      // 步骤 5：完成页
+      // 步骤 5：完成页（已自动保存，只显示摘要）
       console.log(LOG_PREFIX, '所有配置步骤完成，进入完成页');
       await this.showCompletion();
-
-      // 标记已完成，下次不再自动弹出
-      this.state.completed = true;
-      await this.context.globalState.update('promptHub.onboardingCompleted', true);
-      await this.saveState();
-      console.log(LOG_PREFIX, '向导标记为已完成');
     } catch (error) {
       console.error(LOG_PREFIX, '配置向导执行出错:', error);
       vscode.window.showErrorMessage(
@@ -451,7 +487,7 @@ export class OnboardingWizard {
       'setupRemoteAndInitialPush() 调用，dir =',
       dir,
       'remoteUrl =',
-      remoteUrl
+      this.sanitizeRemoteUrlForLog(remoteUrl)
     );
 
     if (!remoteUrl.trim()) {
@@ -589,9 +625,11 @@ export class OnboardingWizard {
       }
     }
 
+    let existingOriginBeforeEdit: string | undefined;
     // 已有 Git 仓库且存在远程时，先询问如何处理远程
     if (selected.value === 'enable' && isGitRepo) {
       const currentRemote = await this.getCurrentRemoteUrl(resolvedPath);
+      existingOriginBeforeEdit = currentRemote;
 
       if (currentRemote) {
         const remoteAction = await vscode.window.showQuickPick<RemoteActionItem>(
@@ -633,57 +671,261 @@ export class OnboardingWizard {
       }
     }
 
-    const remoteUrl = await vscode.window.showInputBox({
+    let remoteUrl = await vscode.window.showInputBox({
       prompt: [
         '可选：配置或修改远程仓库 URL，用于将此存储目录推送到 Git 托管平台（例如 GitHub、Gitee 等）。',
         '',
+        '提示：如果远程仓库已存在内容，我们会优先推荐“导入/拉取”，避免误操作覆盖。',
         '如果当前仓库已经配置好了远程，或你暂时只想使用本地 Git，可以留空直接回车，我们不会修改现有远程配置。',
       ].join('\n'),
       placeHolder: '例如：https://github.com/your-name/your-repo.git（留空表示不更改/不配置远程）',
       ignoreFocusOut: true,
+      value: existingOriginBeforeEdit || undefined,
     });
 
-    console.log(LOG_PREFIX, 'configureGit() 用户输入远程 URL:', remoteUrl);
+    console.log(
+      LOG_PREFIX,
+      'configureGit() 用户输入远程 URL:',
+      remoteUrl ? this.sanitizeRemoteUrlForLog(remoteUrl) : remoteUrl
+    );
 
-    // 如果填写了远程 URL，询问是否立即创建初始提交并推送到远程
-    if (remoteUrl && remoteUrl.trim()) {
-      const action = await vscode.window.showInformationMessage(
-        '检测到你配置了远程仓库 URL。\n\n是否立即在当前存储目录中创建初始提交并推送到远程？\n\n将执行的操作：\n- git add -A\n- git commit --allow-empty -m "chore: init prompt hub storage"\n- git branch -M main\n- git remote add/set-url origin <你的 URL>\n- git push -u origin main',
-        { modal: true },
-        '立即推送',
-        '稍后再说'
-      );
+    // 若填写了远程 URL：先探测远程是否非空，再给出安全动作建议
+    while (remoteUrl && remoteUrl.trim()) {
+      const url = remoteUrl.trim();
+      const local = await this.getLocalRepoSummary(resolvedPath);
+      const probe = await this.probeRemoteRepoState(url, resolvedPath);
 
-      console.log(LOG_PREFIX, 'configureGit() 首次推送确认选择:', action);
+      interface RemoteDecisionItem extends vscode.QuickPickItem {
+        value: 'import' | 'init-push' | 'save-only' | 'update-origin-only' | 'retry' | 'edit-url';
+      }
 
-      if (action === '立即推送') {
+      const sanitized = this.sanitizeRemoteUrlForLog(url);
+      const originBeforeEdit = existingOriginBeforeEdit?.trim();
+      const hasOriginToUpdate = Boolean(originBeforeEdit) && originBeforeEdit !== url;
+
+      const recommendedValue: RemoteDecisionItem['value'] =
+        probe.state === 'empty'
+          ? 'init-push'
+          : probe.state === 'non-empty' && !local.hasMeaningfulHistory
+            ? 'import'
+            : 'save-only';
+
+      const items: RemoteDecisionItem[] = [];
+
+      items.push({
+        label: '$(check) 仅保存远程 URL（不拉取不推送）',
+        description: '推荐：不会对远程仓库造成任何影响',
+        value: 'save-only',
+        picked: recommendedValue === 'save-only',
+      });
+
+      if (hasOriginToUpdate) {
+        items.push({
+          label: '$(repo) 仅更新本地 origin（不拉取不推送）',
+          description: '只修改本地 Git 远程指向，不会改远程内容',
+          value: 'update-origin-only',
+        });
+      }
+
+      if (probe.state === 'non-empty') {
+        items.push({
+          label: '$(cloud-download) 从远程导入/拉取到本地（推荐）',
+          description: local.hasMeaningfulHistory
+            ? '检测到本地已有提交/文件：导入会重置分支到远程，建议先备份或使用新目录'
+            : '远程仓库已有内容：推荐先导入再开始使用',
+          value: 'import',
+          picked: recommendedValue === 'import',
+        });
+      }
+
+      if (probe.state === 'empty') {
+        items.push({
+          label: '$(cloud-upload) 创建初始提交并首次推送（推荐）',
+          description: '远程仓库为空：首次推送会把本地内容同步到远程',
+          value: 'init-push',
+          picked: recommendedValue === 'init-push',
+        });
+      }
+
+      if (probe.state === 'not-found' || probe.state === 'unauthorized' || probe.state === 'unreachable') {
+        items.push({
+          label: '$(debug-restart) 重试远程探测',
+          description: '有时是网络/权限临时问题',
+          value: 'retry',
+        });
+      }
+
+      items.push({
+        label: '$(pencil) 修改远程 URL',
+        description: '重新输入 URL',
+        value: 'edit-url',
+      });
+
+      const statusLine =
+        probe.state === 'non-empty'
+          ? '探测结果：远程仓库已有内容'
+          : probe.state === 'empty'
+            ? '探测结果：远程仓库为空'
+            : probe.state === 'not-found'
+              ? '探测结果：远程仓库不存在或 URL 不正确'
+              : probe.state === 'unauthorized'
+                ? '探测结果：无权限访问远程仓库（可能是私有仓库/需要认证）'
+                : '探测结果：无法访问远程仓库（网络或其它错误）';
+
+      const detailLine =
+        probe.state === 'not-found' || probe.state === 'unauthorized' || probe.state === 'unreachable'
+          ? probe.detail
+            ? `\n\n详情：\n${probe.detail}`
+            : ''
+          : '';
+
+      const decision = await vscode.window.showQuickPick<RemoteDecisionItem>(items, {
+        title: 'Git 远程操作建议',
+        placeHolder: `${statusLine}\n远程：${sanitized}${detailLine}`,
+        ignoreFocusOut: true,
+      });
+
+      console.log(LOG_PREFIX, 'configureGit() 远程动作选择:', decision?.value);
+
+      if (!decision) {
+        break;
+      }
+
+      if (decision.value === 'retry') {
+        continue;
+      }
+
+      if (decision.value === 'edit-url') {
+        remoteUrl = await vscode.window.showInputBox({
+          prompt: '请输入新的远程仓库 URL（留空表示不更改/不配置远程）',
+          placeHolder: '例如：https://github.com/your-name/your-repo.git',
+          ignoreFocusOut: true,
+          value: url,
+        });
+        console.log(
+          LOG_PREFIX,
+          'configureGit() 修改 URL 后的输入:',
+          remoteUrl ? this.sanitizeRemoteUrlForLog(remoteUrl) : remoteUrl
+        );
+        continue;
+      }
+
+      if (decision.value === 'save-only') {
+        remoteUrl = url;
+        break;
+      }
+
+      if (decision.value === 'update-origin-only') {
         try {
-          await this.setupRemoteAndInitialPush(resolvedPath, remoteUrl);
-          vscode.window.showInformationMessage('已完成 Git 远程初始化并首次推送。');
+          const git = new GitSyncService(this.configService);
+          await git.setOriginRemoteUrl(url);
+          vscode.window.showInformationMessage('已更新本地 origin 指向（未执行拉取/推送）。');
         } catch (error) {
-          console.error(LOG_PREFIX, 'configureGit() 首次推送出错:', error);
+          vscode.window.showErrorMessage(
+            `更新本地 origin 失败：${error instanceof Error ? error.message : String(error)}`
+          );
+        }
+        remoteUrl = url;
+        break;
+      }
 
-          const rawMessage = error instanceof Error ? error.message : String(error);
-          const lines = rawMessage.split(/\r?\n/);
-          const filteredLines = lines.filter((line) => {
-            const trimmed = line.trim();
-            if (!trimmed) return false;
-            // Git 常见的非错误提示，不作为错误弹出
-            if (trimmed.startsWith('To ')) return false;
-            if (/^[0-9a-f]+\.\.[0-9a-f]+\s+.+->.+$/.test(trimmed)) return false;
-            if (trimmed === 'Everything up-to-date') return false;
-            return true;
-          });
+      if (decision.value === 'import') {
+        const confirm = await vscode.window.showWarningMessage(
+          [
+            '将从远程仓库导入内容到本地存储目录（不会对远程仓库造成影响）。',
+            '',
+            `远程：${sanitized}`,
+            '',
+            '将执行的操作（概览）：',
+            '- 初始化本地仓库（如未初始化）',
+            '- 配置/更新 origin 指向该远程',
+            '- git fetch --prune origin',
+            '- 检测远端默认分支并检出（可能重置当前分支到远端）',
+            '',
+            local.hasMeaningfulHistory
+              ? '注意：检测到本地已有提交/文件，导入可能重置当前分支并影响本地内容，建议先备份或使用新目录。'
+              : '提示：如果本地存在未跟踪文件阻塞检出，我们会尝试自动备份后再导入。',
+          ].join('\n'),
+          { modal: true },
+          '开始导入',
+          '取消'
+        );
 
-          if (filteredLines.length === 0) {
-            // 只剩下推送摘要等情况，视为正常完成
-            vscode.window.showInformationMessage('Git 推送已完成。');
-          } else {
-            vscode.window.showErrorMessage(
-              `Git 远程初始化或推送失败：${filteredLines.join('\n')}`
-            );
+        if (confirm !== '开始导入') {
+          remoteUrl = url;
+          break;
+        }
+
+        try {
+          const git = new GitSyncService(this.configService);
+          await git.setOriginRemoteUrl(url);
+          await git.importFromRemote(url);
+          await this.refreshPromptViewAfterGit();
+          vscode.window.showInformationMessage('已从远程导入完成，本地仓库已就绪。');
+        } catch (error) {
+          console.error(LOG_PREFIX, 'configureGit() 远程导入出错:', error);
+          vscode.window.showErrorMessage(
+            `从远程导入失败：${error instanceof Error ? error.message : String(error)}`
+          );
+        }
+
+        remoteUrl = url;
+        break;
+      }
+
+      if (decision.value === 'init-push') {
+        const action = await vscode.window.showInformationMessage(
+          [
+            '探测到远程仓库为空。',
+            '',
+            '是否立即在当前存储目录中创建初始提交并推送到远程？',
+            '',
+            `远程：${sanitized}`,
+            '',
+            '将执行的操作：',
+            '- git add -A',
+            '- git commit --allow-empty -m "chore: init prompt hub storage"',
+            '- git branch -M main',
+            '- git remote add/set-url origin <你的 URL>',
+            '- git push -u origin main',
+          ].join('\n'),
+          { modal: true },
+          '立即推送',
+          '稍后再说'
+        );
+
+        console.log(LOG_PREFIX, 'configureGit() 首次推送确认选择:', action);
+
+        if (action === '立即推送') {
+          try {
+            await this.setupRemoteAndInitialPush(resolvedPath, url);
+            vscode.window.showInformationMessage('已完成 Git 远程初始化并首次推送。');
+          } catch (error) {
+            console.error(LOG_PREFIX, 'configureGit() 首次推送出错:', error);
+
+            const rawMessage = error instanceof Error ? error.message : String(error);
+            const lines = rawMessage.split(/\r?\n/);
+            const filteredLines = lines.filter((line) => {
+              const trimmed = line.trim();
+              if (!trimmed) return false;
+              // Git 常见的非错误提示，不作为错误弹出
+              if (trimmed.startsWith('To ')) return false;
+              if (/^[0-9a-f]+\.\.[0-9a-f]+\s+.+->.+$/.test(trimmed)) return false;
+              if (trimmed === 'Everything up-to-date') return false;
+              return true;
+            });
+
+            if (filteredLines.length === 0) {
+              // 只剩下推送摘要等情况，视为正常完成
+              vscode.window.showInformationMessage('Git 推送已完成。');
+            } else {
+              vscode.window.showErrorMessage(`Git 远程初始化或推送失败：${filteredLines.join('\n')}`);
+            }
           }
         }
+
+        remoteUrl = url;
+        break;
       }
     }
 
@@ -773,7 +1015,9 @@ export class OnboardingWizard {
 
     // 本地 Claude Code 或 Codex：无需输入 API Key
     if (selected.id === 'local-claude' || selected.id === 'local-codex') {
-      vscode.window.showInformationMessage(`✓ 已选择 ${selected.id === 'local-claude' ? '本地 Claude Code' : '本地 Codex'}。工具将自动检测安装位置，您可以在设置中手动配置路径。`);
+      vscode.window.showInformationMessage(
+        `✓ 已选择 ${selected.id === 'local-claude' ? '本地 Claude Code' : '本地 Codex'}。工具将按优先级自动检测：设置中的路径 > 环境变量 > PATH（where/which）> 常见目录。若检测失败，请在设置中配置对应路径。`
+      );
 
       // 写入 VSCode 配置
       const aiConfig = vscode.workspace.getConfiguration('promptHub.ai');
@@ -859,6 +1103,9 @@ export class OnboardingWizard {
     await aiConfig.update('baseUrl', baseUrl, vscode.ConfigurationTarget.Global);
 
     // 将 API Key 存入 SecretStorage
+    // 新格式：按 provider 分桶，支持后续切换提供商时各自维护 Key
+    await this.context.secrets.store(`promptHub.ai.apiKey.${selected.id}`, apiKey);
+    // 兼容旧格式：历史版本使用 promptHub.ai.apiKey（AIService 会自动迁移到新格式）
     await this.context.secrets.store('promptHub.ai.apiKey', apiKey);
 
     return {
@@ -868,7 +1115,163 @@ export class OnboardingWizard {
     };
   }
 
-  // ========== 步骤 5：完成页 ==========
+  // ========== 步骤 5：Git Bash 检测（仅 Windows + local-claude）==========
+
+  private async checkGitBash(): Promise<{ type: 'next' } | { type: 'back' }> {
+    console.log(LOG_PREFIX, 'checkGitBash() 开始检测 Git Bash');
+
+    // 检测 Git Bash 是否已安装
+    const gitBashPath = await this.detectGitBash();
+    console.log(LOG_PREFIX, 'detectGitBash() 结果:', gitBashPath);
+
+    interface ActionItem extends vscode.QuickPickItem {
+      value: 'continue' | 'download' | 'configure' | 'back';
+    }
+
+    if (gitBashPath) {
+      // 已检测到 Git Bash
+      const message = `✓ 检测到 Git Bash 已安装\n路径：${gitBashPath}\n\nClaude Code 在 Windows 上需要 Git Bash 才能运行。系统已自动检测到安装，您可以直接使用。`;
+
+      const actions: ActionItem[] = [
+        {
+          label: '$(check) 继续',
+          description: 'Git Bash 已就绪，继续完成配置',
+          value: 'continue',
+        },
+        {
+          label: '$(arrow-left) 上一步',
+          description: '返回 AI 配置',
+          value: 'back',
+        },
+      ];
+
+      const selected = await vscode.window.showQuickPick(actions, {
+        placeHolder: message,
+        title: '步骤 5/5：环境检测',
+        ignoreFocusOut: true,
+      });
+
+      if (!selected || selected.value === 'continue') {
+        return { type: 'next' };
+      }
+
+      return { type: 'back' };
+    }
+
+    // 未检测到 Git Bash
+    const message = `⚠ 未检测到 Git Bash\n\nClaude Code 在 Windows 上需要 Git Bash 才能运行。\n\n您可以：\n1. 下载并安装 Git for Windows（推荐）\n2. 如已安装，手动配置环境变量 CLAUDE_CODE_GIT_BASH_PATH\n3. 跳过此步骤，稍后配置`;
+
+    const actions: ActionItem[] = [
+      {
+        label: '$(cloud-download) 下载 Git for Windows',
+        description: '打开官网下载页面（推荐）',
+        value: 'download',
+      },
+      {
+        label: '$(info) 查看配置说明',
+        description: '查看手动配置步骤',
+        value: 'configure',
+      },
+      {
+        label: '$(check) 稍后配置',
+        description: '跳过此步骤，继续完成向导',
+        value: 'continue',
+      },
+      {
+        label: '$(arrow-left) 上一步',
+        description: '返回 AI 配置',
+        value: 'back',
+      },
+    ];
+
+    const selected = await vscode.window.showQuickPick(actions, {
+      placeHolder: message,
+      title: '步骤 5/5：环境检测',
+      ignoreFocusOut: true,
+    });
+
+    if (!selected || selected.value === 'continue') {
+      return { type: 'next' };
+    }
+
+    if (selected.value === 'back') {
+      return { type: 'back' };
+    }
+
+    if (selected.value === 'download') {
+      await vscode.env.openExternal(vscode.Uri.parse('https://gitforwindows.org/'));
+      vscode.window.showInformationMessage(
+        '已打开 Git for Windows 下载页面。安装完成后请重启 VSCode。'
+      );
+      return { type: 'next' };
+    }
+
+    if (selected.value === 'configure') {
+      const configMessage = `手动配置 Git Bash 的步骤：\n\n1. 找到 Git Bash 安装路径（通常是 C:\\Program Files\\Git\\bin\\bash.exe）\n\n2. 在系统环境变量中添加：\n   变量名：CLAUDE_CODE_GIT_BASH_PATH\n   变量值：Git Bash 的完整路径\n\n3. 重启 VSCode\n\n常见路径：\n• C:\\Program Files\\Git\\bin\\bash.exe\n• C:\\Program Files (x86)\\Git\\bin\\bash.exe`;
+
+      await vscode.window.showInformationMessage(configMessage, { modal: true });
+      return { type: 'next' };
+    }
+
+    return { type: 'next' };
+  }
+
+  /**
+   * 检测 Git Bash 是否已安装（仅 Windows）
+   */
+  private async detectGitBash(): Promise<string | null> {
+    if (process.platform !== 'win32') {
+      return null;
+    }
+
+    const possiblePaths = [
+      'C:\\Program Files\\Git\\bin\\bash.exe',
+      'C:\\Program Files (x86)\\Git\\bin\\bash.exe',
+      path.join(os.homedir(), 'AppData', 'Local', 'Programs', 'Git', 'bin', 'bash.exe'),
+    ];
+
+    // 检查常见路径
+    for (const gitBashPath of possiblePaths) {
+      try {
+        await fs.promises.access(gitBashPath, fs.constants.F_OK);
+        console.log(LOG_PREFIX, 'detectGitBash() 找到 Git Bash:', gitBashPath);
+        return gitBashPath;
+      } catch {
+        // 继续检查下一个
+      }
+    }
+
+    // 尝试从 PATH 检测
+    try {
+      const { stdout } = await new Promise<{ stdout: string; stderr: string }>((resolve, reject) => {
+        cp.exec('where bash.exe', { timeout: 5000 }, (error, stdout, stderr) => {
+          if (error) {
+            reject(error);
+          } else {
+            resolve({ stdout, stderr });
+          }
+        });
+      });
+
+      const first = (stdout || '').split(/\r?\n/).map((s: string) => s.trim()).find(Boolean);
+      if (first) {
+        try {
+          await fs.promises.access(first, fs.constants.F_OK);
+          console.log(LOG_PREFIX, 'detectGitBash() 从 PATH 找到 Git Bash:', first);
+          return first;
+        } catch {
+          // 路径不存在
+        }
+      }
+    } catch {
+      // where 命令失败，忽略
+    }
+
+    console.log(LOG_PREFIX, 'detectGitBash() 未找到 Git Bash');
+    return null;
+  }
+
+  // ========== 步骤 6：完成页 ==========
 
   private async showCompletion(): Promise<void> {
     const resolvedStoragePath = this.resolvePath(this.state.storagePath || '~/.prompt-hub');
@@ -890,19 +1293,30 @@ export class OnboardingWizard {
 
     console.log(LOG_PREFIX, 'showCompletion() 显示配置摘要');
 
+    // 自动标记为已完成，配置已在每个步骤中保存，用户无需手动确认
+    this.state.completed = true;
+    await this.context.globalState.update('promptHub.onboardingCompleted', true);
+    await this.saveState();
+    console.log(LOG_PREFIX, '向导已自动标记为完成');
+
+    const openHubItem: vscode.MessageItem = { title: '打开 Prompt Hub' };
+    const openDocsItem: vscode.MessageItem = { title: '查看使用文档' };
+    // VS Code 的 modal 信息框会默认提供一个“取消”作为关闭入口，这里用 isCloseAffordance 改成更贴切的“关闭”
+    const closeItem: vscode.MessageItem = { title: '关闭', isCloseAffordance: true };
+
     const result = await vscode.window.showInformationMessage(
       summaryLines.join('\n'),
       { modal: true },
-      '打开 Prompt Hub',
-      '查看使用文档',
-      '关闭'
+      openHubItem,
+      openDocsItem,
+      closeItem
     );
 
-    console.log(LOG_PREFIX, 'showCompletion() 用户选择:', result);
+    console.log(LOG_PREFIX, 'showCompletion() 用户选择:', result?.title);
 
-    if (result === '打开 Prompt Hub') {
+    if (result === openHubItem) {
       await vscode.commands.executeCommand('promptHubView.focus');
-    } else if (result === '查看使用文档') {
+    } else if (result === openDocsItem) {
       const docsUrl =
         'https://github.com/Nita121388/prompt-hub/blob/main/docs/user-guide.md';
       await vscode.env.openExternal(vscode.Uri.parse(docsUrl));
@@ -1011,6 +1425,204 @@ export class OnboardingWizard {
     }
   }
 
+  private async refreshPromptViewAfterGit(): Promise<void> {
+    try {
+      await vscode.commands.executeCommand('promptHub.refreshView');
+    } catch (error) {
+      console.warn(
+        LOG_PREFIX,
+        'refreshPromptViewAfterGit() 调用 promptHub.refreshView 失败（可忽略）:',
+        error
+      );
+    }
+  }
+
+  private sanitizeRemoteUrlForLog(url: string): string {
+    const raw = (url || '').trim();
+    if (!raw) return raw;
+
+    try {
+      const parsed = new URL(raw);
+      if (parsed.username || parsed.password) {
+        parsed.username = '***';
+        parsed.password = '';
+        return parsed.toString();
+      }
+      return raw;
+    } catch {
+      // scp 风格（git@github.com:org/repo.git）通常不含敏感信息；
+      // 若是 https://token@host/xxx 的非标准写法，做一次粗略脱敏
+      return raw.replace(/\/\/([^@/]+)@/g, '//***@');
+    }
+  }
+
+  private summarizeGitOutput(text: string, maxLines: number = 4): string {
+    const lines = (text || '')
+      .split(/\r?\n/)
+      .map((l) => l.trim())
+      .filter(Boolean)
+      .slice(0, maxLines);
+    return lines.join('\n');
+  }
+
+  private classifyRemoteProbeError(message: string): 'not-found' | 'unauthorized' | 'unreachable' {
+    const text = (message || '').trim();
+    if (!text) return 'unreachable';
+
+    if (
+      /repository not found/i.test(text) ||
+      /does not appear to be a git repository/i.test(text) ||
+      /could not read from remote repository/i.test(text)
+    ) {
+      return 'not-found';
+    }
+
+    if (
+      /permission denied/i.test(text) ||
+      /authentication failed/i.test(text) ||
+      /access denied/i.test(text) ||
+      /could not read Username/i.test(text) ||
+      /\b401\b/.test(text) ||
+      /\b403\b/.test(text)
+    ) {
+      return 'unauthorized';
+    }
+
+    // “not found” 这个词在不同错误里含义混杂，保守归为 unreachable，避免误判
+    return 'unreachable';
+  }
+
+  private async runGitCommandAllowFailure(
+    args: string[],
+    cwd: string
+  ): Promise<{ code: number; stdout: string; stderr: string }> {
+    const safeArgs = args.map((a) => this.sanitizeRemoteUrlForLog(a));
+    console.log(LOG_PREFIX, 'runGitCommandAllowFailure() 调用，cwd =', cwd, 'args =', safeArgs);
+
+    return await new Promise<{ code: number; stdout: string; stderr: string }>((resolve) => {
+      const child = cp.spawn('git', args, { cwd, shell: process.platform === 'win32' });
+      let stdout = '';
+      let stderr = '';
+
+      child.stdout.on('data', (data) => {
+        stdout += data.toString();
+      });
+
+      child.stderr.on('data', (data) => {
+        stderr += data.toString();
+      });
+
+      child.on('error', (error) => {
+        stderr += (error instanceof Error ? error.message : String(error)) || '';
+        resolve({ code: 1, stdout, stderr });
+      });
+
+      child.on('close', (code) => {
+        resolve({ code: code ?? 1, stdout, stderr });
+      });
+    });
+  }
+
+  private async probeRemoteRepoState(
+    remoteUrl: string,
+    cwd: string
+  ): Promise<
+    | { state: 'empty' | 'non-empty' }
+    | { state: 'not-found' | 'unauthorized' | 'unreachable'; detail?: string }
+  > {
+    const url = (remoteUrl || '').trim();
+    if (!url) return { state: 'unreachable', detail: '远程 URL 为空' };
+
+    const heads = await this.runGitCommandAllowFailure(['ls-remote', '--heads', url], cwd);
+    if (heads.code === 0) {
+      if (heads.stdout.trim()) {
+        return { state: 'non-empty' };
+      }
+
+      // 兼容：有些平台在 heads 为空时仍可能存在 HEAD（或仅返回 symref），再探测一次
+      const head = await this.runGitCommandAllowFailure(['ls-remote', url, 'HEAD'], cwd);
+      if (head.code === 0) {
+        return head.stdout.trim() ? { state: 'non-empty' } : { state: 'empty' };
+      }
+
+      const kind = this.classifyRemoteProbeError(head.stderr || head.stdout);
+      return { state: kind, detail: this.summarizeGitOutput(head.stderr || head.stdout) };
+    }
+
+    const kind = this.classifyRemoteProbeError(heads.stderr || heads.stdout);
+    return { state: kind, detail: this.summarizeGitOutput(heads.stderr || heads.stdout) };
+  }
+
+  private isDirectoryEffectivelyEmpty(dir: string): boolean {
+    try {
+      const entries = fs.readdirSync(dir);
+      const others = entries.filter((name) => name !== '.git');
+      return others.length === 0;
+    } catch {
+      return true;
+    }
+  }
+
+  private async getLocalRepoSummary(dir: string): Promise<{
+    isGitRepo: boolean;
+    hasCommit: boolean;
+    commitCount: number;
+    trackedFiles: number;
+    hasMeaningfulHistory: boolean;
+    isEffectivelyEmptyDir: boolean;
+  }> {
+    const isGitRepo = await this.checkGitRepo(dir);
+    const isEffectivelyEmptyDir = this.isDirectoryEffectivelyEmpty(dir);
+
+    if (!isGitRepo) {
+      return {
+        isGitRepo,
+        hasCommit: false,
+        commitCount: 0,
+        trackedFiles: 0,
+        hasMeaningfulHistory: false,
+        isEffectivelyEmptyDir,
+      };
+    }
+
+    let hasCommit = false;
+    try {
+      await this.runGitCommand(['rev-parse', '--verify', 'HEAD'], dir);
+      hasCommit = true;
+    } catch {
+      hasCommit = false;
+    }
+
+    let commitCount = 0;
+    if (hasCommit) {
+      try {
+        const out = await this.runGitCommandAndGetStdout(['rev-list', '--count', 'HEAD'], dir);
+        commitCount = Number.parseInt(out.trim(), 10) || 1;
+      } catch {
+        commitCount = 1;
+      }
+    }
+
+    let trackedFiles = 0;
+    try {
+      const out = await this.runGitCommandAndGetStdout(['ls-files'], dir);
+      trackedFiles = out.split(/\r?\n/).filter(Boolean).length;
+    } catch {
+      trackedFiles = 0;
+    }
+
+    const hasMeaningfulHistory = hasCommit && (commitCount > 1 || trackedFiles > 0);
+
+    return {
+      isGitRepo,
+      hasCommit,
+      commitCount,
+      trackedFiles,
+      hasMeaningfulHistory,
+      isEffectivelyEmptyDir,
+    };
+  }
+
   /** 在指定目录初始化 Git 仓库 */
   private async initGitRepo(dir: string): Promise<boolean> {
     const confirm = await vscode.window.showWarningMessage(
@@ -1056,7 +1668,8 @@ export class OnboardingWizard {
    * 在指定目录执行 git 命令并返回标准输出
    */
   private async runGitCommandAndGetStdout(args: string[], cwd: string): Promise<string> {
-    console.log(LOG_PREFIX, 'runGitCommandAndGetStdout() 调用，cwd =', cwd, 'args =', args);
+    const safeArgs = args.map((a) => this.sanitizeRemoteUrlForLog(a));
+    console.log(LOG_PREFIX, 'runGitCommandAndGetStdout() 调用，cwd =', cwd, 'args =', safeArgs);
 
     return await new Promise<string>((resolve, reject) => {
       const child = cp.spawn('git', args, { cwd, shell: process.platform === 'win32' });
@@ -1093,7 +1706,8 @@ export class OnboardingWizard {
 
   /** 在指定目录执行 git 命令（只关心成功/失败） */
   private async runGitCommand(args: string[], cwd: string): Promise<void> {
-    console.log(LOG_PREFIX, 'runGitCommand() 调用，cwd =', cwd, 'args =', args);
+    const safeArgs = args.map((a) => this.sanitizeRemoteUrlForLog(a));
+    console.log(LOG_PREFIX, 'runGitCommand() 调用，cwd =', cwd, 'args =', safeArgs);
 
     await new Promise<void>((resolve, reject) => {
       const child = cp.spawn('git', args, { cwd, shell: process.platform === 'win32' });
@@ -1120,4 +1734,5 @@ export class OnboardingWizard {
       });
     });
   }
+
 }
