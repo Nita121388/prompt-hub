@@ -9,3 +9,37 @@ node_modules
 .vscode/settings.json
 coverage/
 .nyc_output/
+
+# 本地临时文件/个人记录/交付产物（避免误提交）
+temp.txt
+mytalk.md
+image/
+*.backup
+
+# 本地输出/总结类文档（通常不适合入库）
+FIX-SUMMARY.md
+TEST-RESULTS.md
+VERIFICATION_REPORT.md
+IMPLEMENTATION_SUMMARY*.txt
+GIT-BASH-GUIDANCE.md
+PROMPT-IMPROVEMENT.md
+README_新功能.md
+AI功能简版说明.md
+AI功能详细说明.md
+完整测试指南.md
+实现交付文档.md
+实现完成总结.md
+实现总结与下一步.md
+审查总结（简版）.md
+快速实施指南.md
+批量生成命令代码参考.md
+支持Gemini_DeepSeek_批量生成实现方案.md
+文档审查报告.md
+🎯_交付清单.md
+
+# 本地调试/实现过程文档（如需发布请移至 docs/ 并经人工整理）
+docs/LOCAL_AI_IMPLEMENTATION_SUMMARY.md
+
+# 本地临时测试脚本
+test-claude-codex.js
+test-improved-prompt.js
