@@ -318,8 +318,15 @@
           "type": "boolean",
           "default": false,
           "description": "是否启用与远端的 Git 同步（pull/push）。关闭时不会进行远端同步。",
-          "markdownDescription": "是否启用与远端的 Git 同步（pull/push）。\n\n- `true`：同步时会执行 `pull --rebase` + `push`\n- `false`：不会执行远端同步（避免网络操作）；仍可能在本地执行 `git add`/`git commit`（取决于触发的命令/流程）",
+          "markdownDescription": "是否启用与远端的 Git 同步（pull/push）。\n\n- `true`：同步时会执行 `pull --rebase`（默认带 `--autostash`） + `push`\n- `false`：不会执行远端同步（避免网络操作）；仍可能在本地执行 `git add`/`git commit`（取决于触发的命令/流程）\n\n提示：可通过 `promptHub.git.pullRebaseAutostash` 控制是否启用自动暂存。",
           "order": 30
+        },
+        "promptHub.git.pullRebaseAutostash": {
+          "type": "boolean",
+          "default": true,
+          "description": "执行 git pull --rebase 时是否启用 --autostash（自动暂存/恢复本地改动）。",
+          "markdownDescription": "执行 `git pull --rebase` 时是否启用 `--autostash`。\n\n- `true`（默认）：当本地存在未提交改动时，Git 会自动暂存（stash）→ 拉取/变基 → 再自动恢复改动，减少“Please commit or stash them”报错\n- `false`：保持 Git 默认行为；若本地有未提交改动，需要你手动 `git commit` 或 `git stash` 后再拉取\n\n提示：若你的 Git 版本较旧不支持 `--autostash`，请升级 Git 或将该项关闭。",
+          "order": 30.2
         },
         "promptHub.git.remoteUrl": {
           "type": "string",
@@ -332,7 +339,7 @@
           "type": "boolean",
           "default": false,
           "description": "VSCode 启动时自动拉取/导入远端更新（可能修改本地文件）。",
-          "markdownDescription": "VSCode 启动时自动拉取/导入远端更新。\n\n- 若本地是仓库：执行 `git pull --rebase`\n- 若本地不是仓库：会尝试使用 `promptHub.git.remoteUrl` 导入；为避免冲突，必要时会先备份当前目录文件\n\n提示：该操作会修改 `promptHub.storagePath` 下的文件，建议在了解行为后再开启。",
+          "markdownDescription": "VSCode 启动时自动拉取/导入远端更新。\n\n- 若本地是仓库：执行 `git pull --rebase`（默认带 `--autostash`，可用 `promptHub.git.pullRebaseAutostash` 关闭）\n- 若本地不是仓库：会尝试使用 `promptHub.git.remoteUrl` 导入；为避免冲突，必要时会先备份当前目录文件\n\n提示：该操作会修改 `promptHub.storagePath` 下的文件，建议在了解行为后再开启。",
           "order": 31
         },
         "promptHub.git.commitMessageTemplate": {
@@ -450,6 +457,33 @@
           "markdownDescription": "批量 AI 调用的间隔延迟（单位：毫秒）。\n\n当你使用“批量生成元信息/批量优化”等功能时，会在两次请求之间等待一段时间，以降低触发 429/限流的概率。",
           "order": 60
         },
+        "promptHub.ai.batchChunkSize": {
+          "type": "number",
+          "default": 10,
+          "minimum": 1,
+          "maximum": 50,
+          "description": "批量元信息生成/优化时，每次合并为一次调用的条目数量上限（主要用于本地 CLI 批处理）。",
+          "markdownDescription": "批量元信息生成/优化时，每次合并为一次 AI 调用的条目数量上限。\n\n- 对云端 Provider：仍会逐条请求（并按 `promptHub.ai.batchDelayMs` 节流）\n- 对本地 Provider（`local-claude`/`local-codex`）：会尽量把多条合并为一次 CLI 调用，以减少重复启动进程的开销\n\n提示：设置过大可能导致命令行长度过长，建议配合 `promptHub.ai.batchMaxPromptChars`。",
+          "order": 59
+        },
+        "promptHub.ai.batchItemPreviewChars": {
+          "type": "number",
+          "default": 600,
+          "minimum": 50,
+          "maximum": 4000,
+          "description": "批量合并时，每条 Prompt 参与生成标题/emoji 的内容预览长度（字符数，主要用于本地 CLI）。",
+          "markdownDescription": "批量合并时，每条 Prompt 参与生成标题/emoji 的内容预览长度（字符数）。\n\n用于控制单次合并调用的整体长度，避免命令行过长；通常不需要设置太大。",
+          "order": 58
+        },
+        "promptHub.ai.batchMaxPromptChars": {
+          "type": "number",
+          "default": 7000,
+          "minimum": 1000,
+          "maximum": 30000,
+          "description": "批量合并时传给本地 CLI 的提示文本最大长度（字符数），用于规避命令行长度限制。",
+          "markdownDescription": "批量合并时传给本地 CLI 的提示文本最大长度（字符数）。\n\nWindows 上部分命令行环境存在长度限制；当超限时会自动拆分批次或降级逐条处理。",
+          "order": 57
+        },
         "promptHub.local.claudePath": {
           "type": "string",
           "default": "",
@@ -512,7 +546,7 @@
   "dependencies": {
     "fuse.js": "^7.0.0"
   },
-  "publisher": "your-publisher-name",
+  "publisher": "Nita121388",
   "repository": {
     "type": "git",
     "url": "https://github.com/Nita121388/prompt-hub"

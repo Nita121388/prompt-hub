@@ -1,11 +1,12 @@
 import * as vscode from 'vscode';
-import { exec } from 'child_process';
+import { exec, spawn } from 'child_process';
 import { promisify } from 'util';
 import * as path from 'path';
 import * as os from 'os';
 import * as fs from 'fs';
 import { ConfigurationService } from './ConfigurationService';
-import { GeneratedMeta } from './AIService';
+import type { BatchMetaRequestItem, BatchMetaResultItem, GeneratedMeta } from './AIService';
+import { extractJsonArray } from '../utils/JsonExtract';
 
 const execAsync = promisify(exec);
 const fsPromises = fs.promises;
@@ -15,14 +16,133 @@ const fsPromises = fs.promises;
  * 调用本地安装的 Claude Code CLI 进行 AI 操作
  */
 export class LocalClaudeProvider {
+  private cachedClaudePath: string | null | undefined;
+
   constructor(private readonly config: ConfigurationService) {}
 
-  private formatCommand(bin: string, args: string): string {
+  private async runClaudeCli(
+    claudePath: string,
+    args: string[],
+    timeoutMs: number,
+    maxBufferBytes = 2 * 1024 * 1024
+  ): Promise<{ stdout: string; stderr: string }> {
+    const startedAt = Date.now();
+    const commandForLog = this.formatCommand(claudePath, args);
+    console.log('[LocalClaudeProvider] runClaudeCli() spawn:', commandForLog);
+    console.log('[LocalClaudeProvider] runClaudeCli() stdio: [ignore, pipe, pipe]');
+    console.log('[LocalClaudeProvider] runClaudeCli() parent isTTY:', {
+      stdin: process.stdin.isTTY,
+      stdout: process.stdout.isTTY,
+      stderr: process.stderr.isTTY,
+    });
+
+    return await new Promise((resolve, reject) => {
+      const child = spawn(claudePath, args, {
+        windowsHide: true,
+        stdio: ['ignore', 'pipe', 'pipe'],
+      });
+
+      let stdout = '';
+      let stderr = '';
+      let collectedBytes = 0;
+      let timedOut = false;
+      let maxBufferExceeded = false;
+
+      const timer = setTimeout(() => {
+        timedOut = true;
+        child.kill('SIGTERM');
+      }, timeoutMs);
+
+      const onBuffer = (kind: 'stdout' | 'stderr', chunk: Buffer) => {
+        collectedBytes += chunk.length;
+        const text = chunk.toString('utf8');
+        if (kind === 'stdout') stdout += text;
+        else stderr += text;
+
+        if (collectedBytes > maxBufferBytes && !maxBufferExceeded) {
+          maxBufferExceeded = true;
+          child.kill('SIGTERM');
+        }
+      };
+
+      child.stdout?.on('data', (d) => onBuffer('stdout', d));
+      child.stderr?.on('data', (d) => onBuffer('stderr', d));
+
+      child.on('error', (error) => {
+        clearTimeout(timer);
+        reject(error);
+      });
+
+      child.on('close', (code, signal) => {
+        clearTimeout(timer);
+
+        const elapsed = Date.now() - startedAt;
+        console.log('[LocalClaudeProvider] runClaudeCli() exited:', { code, signal, elapsedMs: elapsed });
+
+        if (maxBufferExceeded) {
+          const err: any = new Error(
+            `Claude CLI 输出过大（>${maxBufferBytes} bytes）已终止，请缩短 Prompt 或提高 maxBuffer 配置。`
+          );
+          err.code = code;
+          err.signal = signal;
+          err.killed = true;
+          err.stdout = stdout;
+          err.stderr = stderr;
+          reject(err);
+          return;
+        }
+
+        if (timedOut) {
+          const err: any = new Error(
+            `Claude CLI 执行超时（${timeoutMs}ms）被终止：可能是首次登录/授权需要交互、网络较慢或 Claude 进程卡住。补充：Claude 在检测到 stdin 为 pipe 时可能会等待 EOF（Node 默认会保持 stdin 打开）导致“假死”；本插件已使用 stdin=ignore 规避该问题。`
+          );
+          err.code = code;
+          err.signal = signal ?? 'SIGTERM';
+          err.killed = true;
+          err.stdout = stdout;
+          err.stderr = stderr;
+          reject(err);
+          return;
+        }
+
+        if (code === 0) {
+          resolve({ stdout, stderr });
+          return;
+        }
+
+        const err: any = new Error(`Command failed: ${commandForLog}`);
+        err.code = code;
+        err.signal = signal;
+        err.killed = false;
+        err.stdout = stdout;
+        err.stderr = stderr;
+        reject(err);
+      });
+    });
+  }
+
+  private formatCommand(bin: string, args: string | string[]): string {
     const trimmed = (bin || '').trim();
     const needsQuote = /[\s"]/g.test(trimmed);
     const escapedBin = trimmed.replace(/"/g, '""');
     const binPart = needsQuote ? `"${escapedBin}"` : escapedBin;
-    return `${binPart} ${args}`.trim();
+    const argsPart = Array.isArray(args) ? this.formatArgsForLog(args) : args;
+    return `${binPart} ${argsPart}`.trim();
+  }
+
+  private formatArgsForLog(args: string[]): string {
+    return args
+      .map((arg, index) => {
+        if (index === args.length - 1 && arg.length > 500) {
+          return `${JSON.stringify(arg.slice(0, 500))}... (len=${arg.length})`;
+        }
+        return JSON.stringify(arg);
+      })
+      .join(' ');
+  }
+
+  private normalizePromptArg(arg: string): string {
+    return (arg || '').replace(/\r?\n/g, ' ').split('\0').join('');
   }
 
   /**
@@ -51,18 +171,13 @@ ${content.substring(0, 2000)}`;
 
       // 调用 Claude Code CLI（最简单的方式）
       // 使用 -p/--print 避免进入交互模式，并跳过工作区信任对话框
-      const command = this.formatCommand(
-        claudePath,
-        `-p --output-format text "${this.escapeArg(prompt)}"`
-      );
+      const args = ['-p', '--output-format', 'text', this.normalizePromptArg(prompt)];
+      const command = this.formatCommand(claudePath, args);
       console.log('[LocalClaudeProvider] 执行命令:', command.length > 500 ? `${command.slice(0, 500)}... (len=${command.length})` : command);
       console.log('[LocalClaudeProvider] 超时设置:', timeoutMs, 'ms');
 
       const startedAt = Date.now();
-      const { stdout, stderr } = await execAsync(command, {
-        timeout: timeoutMs,
-        maxBuffer: 2 * 1024 * 1024
-      });
+      const { stdout, stderr } = await this.runClaudeCli(claudePath, args, timeoutMs);
       console.log('[LocalClaudeProvider] 执行耗时:', Date.now() - startedAt, 'ms');
 
       if (stderr) {
@@ -110,6 +225,132 @@ ${content.substring(0, 2000)}`;
     }
   }
 
+  async generateMetaBatch(items: BatchMetaRequestItem[]): Promise<BatchMetaResultItem[]> {
+    const timeoutMs = this.config.get<number>('local.claudeTimeoutMs', 120000);
+
+    const claudePath = await this.getClaudePath();
+    if (!claudePath) {
+      throw new Error(
+        '未找到 Claude Code CLI，请在设置中配置 promptHub.local.claudePath，或设置环境变量 CLAUDE_BIN，或确保 PATH 中可直接执行 claude'
+      );
+    }
+
+    const maxChunkSize = this.config.get<number>('ai.batchChunkSize', 10);
+    const previewChars = this.config.get<number>('ai.batchItemPreviewChars', 600);
+    const maxPromptChars = this.config.get<number>('ai.batchMaxPromptChars', 7000);
+
+    const results = new Map<string, BatchMetaResultItem>();
+    const pending = [...items];
+
+    while (pending.length > 0) {
+      const chunk: BatchMetaRequestItem[] = [];
+
+      while (chunk.length < maxChunkSize && pending.length > 0) {
+        const next = pending[0];
+        const candidate = [...chunk, next];
+        const prompt = this.buildBatchMetaPrompt(candidate, previewChars);
+
+        if (prompt.length > maxPromptChars && chunk.length > 0) break;
+
+        pending.shift();
+        chunk.push(next);
+
+        if (prompt.length > maxPromptChars && chunk.length === 1) break;
+      }
+
+      const chunkResults = await this.generateMetaBatchOnce(claudePath, chunk, timeoutMs, previewChars, maxPromptChars);
+      for (const r of chunkResults) results.set(r.id, r);
+    }
+
+    return items.map((i) => results.get(i.id) || { id: i.id, error: '未返回结果' });
+  }
+
+  private async generateMetaBatchOnce(
+    claudePath: string,
+    items: BatchMetaRequestItem[],
+    timeoutMs: number,
+    previewChars: number,
+    maxPromptChars: number
+  ): Promise<BatchMetaResultItem[]> {
+    const LOG_PREFIX = '[LocalClaudeProvider] generateMetaBatch';
+    const safeItems = items.filter((i) => i && typeof i.id === 'string');
+    if (!safeItems.length) return [];
+
+    let prompt = this.buildBatchMetaPrompt(safeItems, previewChars);
+    if (prompt.length > maxPromptChars) {
+      const reducedPreview = Math.max(120, Math.floor(previewChars / 2));
+      prompt = this.buildBatchMetaPrompt(safeItems, reducedPreview);
+    }
+
+    if (prompt.length > maxPromptChars && safeItems.length > 1) {
+      const mid = Math.ceil(safeItems.length / 2);
+      const left = await this.generateMetaBatchOnce(claudePath, safeItems.slice(0, mid), timeoutMs, previewChars, maxPromptChars);
+      const right = await this.generateMetaBatchOnce(claudePath, safeItems.slice(mid), timeoutMs, previewChars, maxPromptChars);
+      return [...left, ...right];
+    }
+
+    try {
+      const args = ['-p', '--output-format', 'text', this.normalizePromptArg(prompt)];
+
+      const startedAt = Date.now();
+      const { stdout, stderr } = await this.runClaudeCli(claudePath, args, timeoutMs);
+      const elapsed = Date.now() - startedAt;
+      console.log(`${LOG_PREFIX} 执行完成, 耗时: ${elapsed}ms, items=${safeItems.length}`);
+
+      if (stderr) {
+        console.warn(`${LOG_PREFIX} stderr:`, stderr.slice(0, 500));
+      }
+
+      const parsed = extractJsonArray<Record<string, unknown>>(stdout);
+      if (!parsed) {
+        throw new Error('无法从 Claude Code 响应中解析 JSON 数组');
+      }
+
+      const byId = new Map<string, BatchMetaResultItem>();
+      for (const item of parsed) {
+        const idValue = item['id'];
+        const id = typeof idValue === 'string' ? idValue.trim() : '';
+        if (!id) continue;
+        const nameValue = item['name'];
+        const emojiValue = item['emoji'];
+        const name = typeof nameValue === 'string' ? nameValue.trim() : undefined;
+        const emoji = typeof emojiValue === 'string' ? emojiValue.trim() : undefined;
+        byId.set(id, { id, name: name || undefined, emoji: emoji || undefined });
+      }
+
+      const results: BatchMetaResultItem[] = [];
+      for (const req of safeItems) {
+        const got = byId.get(req.id);
+        if (got) {
+          results.push(got);
+          continue;
+        }
+
+        try {
+          const single = await this.generateMeta(req.content);
+          results.push({ id: req.id, name: single.name, emoji: single.emoji });
+        } catch (error) {
+          results.push({ id: req.id, error: error instanceof Error ? error.message : String(error) });
+        }
+      }
+
+      return results;
+    } catch (error) {
+      console.error(`${LOG_PREFIX} 失败，将降级为逐个处理:`, error instanceof Error ? error.message : String(error));
+
+      const results: BatchMetaResultItem[] = [];
+      for (const req of safeItems) {
+        try {
+          const single = await this.generateMeta(req.content);
+          results.push({ id: req.id, name: single.name, emoji: single.emoji });
+        } catch (e) {
+          results.push({ id: req.id, error: e instanceof Error ? e.message : String(e) });
+        }
+      }
+      return results;
+    }
+  }
+
   /**
    * 使用本地 Claude Code 优化内容
    */
@@ -125,18 +366,12 @@ ${content.substring(0, 2000)}`;
 
       const prompt = `请优化以下 Prompt 文本，使其更清晰简洁，保持中文 Markdown 格式。只返回优化后的文本，不要其他说明。\n\n${content}`;
 
-      const command = this.formatCommand(
-        claudePath,
-        `-p --output-format text "${this.escapeArg(prompt)}"`
-      );
+      const args = ['-p', '--output-format', 'text', this.normalizePromptArg(prompt)];
       console.log('[LocalClaudeProvider] 执行优化命令');
       console.log('[LocalClaudeProvider] 超时设置:', timeoutMs, 'ms');
 
       const startedAt = Date.now();
-      const { stdout } = await execAsync(command, {
-        timeout: timeoutMs,
-        maxBuffer: 2 * 1024 * 1024
-      });
+      const { stdout } = await this.runClaudeCli(claudePath, args, timeoutMs);
       console.log('[LocalClaudeProvider] 执行耗时:', Date.now() - startedAt, 'ms');
 
       return stdout.trim() || content;
@@ -173,6 +408,8 @@ ${content.substring(0, 2000)}`;
    * 优先级：配置 > 环境变量 > PATH > 常见目录
    */
   private async getClaudePath(): Promise<string | null> {
+    if (this.cachedClaudePath !== undefined) return this.cachedClaudePath;
+
     console.log('[LocalClaudeProvider] getClaudePath() 开始检测 Claude CLI 路径');
     // 1. 从配置读取
     const configured = this.config.get<string>('local.claudePath');
@@ -181,6 +418,7 @@ ${content.substring(0, 2000)}`;
       const ok = await this.fileExists(resolved);
       console.log('[LocalClaudeProvider] 配置 local.claudePath:', configured, '=>', resolved, 'exists=', ok);
       if (ok) {
+        this.cachedClaudePath = resolved;
         return resolved;
       }
     } else {
@@ -194,6 +432,7 @@ ${content.substring(0, 2000)}`;
       const ok = await this.fileExists(resolved);
       console.log('[LocalClaudeProvider] 环境变量 CLAUDE_BIN/CLAUDE_PATH:', envClaudeBin, '=>', resolved, 'exists=', ok);
       if (ok) {
+        this.cachedClaudePath = resolved;
         return resolved;
       }
     } else {
@@ -204,6 +443,7 @@ ${content.substring(0, 2000)}`;
     const fromExtensions = await this.detectClaudeFromVSCodeExtensions();
     if (fromExtensions) {
       console.log('[LocalClaudeProvider] 从 VSCode 扩展目录检测到 Claude CLI:', fromExtensions);
+      this.cachedClaudePath = fromExtensions;
       return fromExtensions;
     }
 
@@ -211,17 +451,37 @@ ${content.substring(0, 2000)}`;
     const fromPath = await this.detectClaudeFromPath();
     if (fromPath) {
       console.log('[LocalClaudeProvider] 从 PATH 检测到 Claude CLI:', fromPath);
+      this.cachedClaudePath = fromPath;
       return fromPath;
     }
 
     // 5. 自动检测常见路径
     const detectedPath = await this.detectClaudePath();
     if (detectedPath) {
+      this.cachedClaudePath = detectedPath;
       return detectedPath;
     }
 
     console.warn('[LocalClaudeProvider] 未找到 Claude CLI：已尝试 配置/local.claudePath、环境变量 CLAUDE_BIN、PATH(where/which)、VSCode 扩展目录、常见目录');
+    this.cachedClaudePath = null;
     return null;
+  }
+
+  private buildBatchMetaPrompt(items: BatchMetaRequestItem[], previewChars: number): string {
+    const entries = items
+      .map((i) => {
+        const snippet = this.normalizeBatchContent(i.content, previewChars);
+        return `ID=${i.id} 内容=${snippet}`;
+      })
+      .join(' ||| ');
+
+    return `你是一个提示词整理助手。现在有若干条目，每条目包含 ID 和内容。请为每条目生成一个简短中文标题（5-10字）和一个相关 emoji。只输出 JSON 数组，不要任何其他文字。数组元素格式：{"id":"ID","name":"标题","emoji":"😀"}。条目：${entries}`;
+  }
+
+  private normalizeBatchContent(content: string, maxChars: number): string {
+    const normalized = (content || '').replace(/\s+/g, ' ').trim().replace(/\|\|\|/g, '| | |');
+    if (!normalized) return '(空)';
+    return normalized.length > maxChars ? normalized.slice(0, maxChars) : normalized;
   }
 
   /**
@@ -371,19 +631,6 @@ ${content.substring(0, 2000)}`;
       return true;
     } catch {
       return false;
-    }
-  }
-
-  /**
-   * 转义命令行参数（Windows/Unix 兼容）
-   */
-  private escapeArg(arg: string): string {
-    if (process.platform === 'win32') {
-      // Windows: 转义双引号
-      return arg.replace(/"/g, '""').replace(/\n/g, ' ');
-    } else {
-      // Unix: 转义特殊字符
-      return arg.replace(/'/g, "'\\''").replace(/\n/g, ' ');
     }
   }
 

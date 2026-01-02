@@ -61,6 +61,55 @@ suite('AIService 测试', () => {
     );
   });
 
+  test('批量生成元信息应按 id 返回结果', async () => {
+    const secrets = new Map<string, string>([['ai.apiKey.openai', 'key']]);
+
+    const mockConfigService: any = {
+      get: (key: string, defaultValue?: any) => {
+        if (key === 'ai.provider') return 'openai';
+        if (key === 'ai.baseUrl') return 'https://api.openai.com/v1';
+        if (key === 'ai.model') return '';
+        if (key === 'ai.batchDelayMs') return 0;
+        return defaultValue;
+      },
+      getSecret: async (key: string) => secrets.get(key),
+      storeSecret: async (key: string, value: string) => {
+        secrets.set(key, value);
+      },
+    };
+
+    let fetchCalls = 0;
+    (globalThis as any).fetch = async () => {
+      fetchCalls += 1;
+      const content = fetchCalls === 1 ? '{"name":"标题A","emoji":"🅰️"}' : '{"name":"标题B","emoji":"🅱️"}';
+      return {
+        ok: true,
+        status: 200,
+        statusText: 'OK',
+        json: async () => ({
+          choices: [{ message: { content } }],
+        }),
+      };
+    };
+
+    (vscode.window as any).showInputBox = async () => {
+      throw new Error('测试不应触发输入框');
+    };
+    (vscode.window as any).showWarningMessage = async () => undefined;
+
+    const ai = new AIService(mockConfigService);
+    const results = await ai.generateMetaBatch([
+      { id: 'a', content: '内容A' },
+      { id: 'b', content: '内容B' },
+    ]);
+
+    assert.deepStrictEqual(results, [
+      { id: 'a', name: '标题A', emoji: '🅰️' },
+      { id: 'b', name: '标题B', emoji: '🅱️' },
+    ]);
+    assert.strictEqual(fetchCalls, 2, '应调用两次 fetch（逐条请求）');
+  });
+
   test('未配置 provider 时不应发起请求', async () => {
     const mockConfigService: any = {
       get: (_key: string, defaultValue?: any) => defaultValue,
@@ -83,4 +132,3 @@ suite('AIService 测试', () => {
     assert.strictEqual(called, false, '未配置 provider 时不应调用 fetch');
   });
 });
-

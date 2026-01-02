@@ -8,6 +8,18 @@ export interface GeneratedMeta {
   emoji?: string;
 }
 
+export interface BatchMetaRequestItem {
+  id: string;
+  content: string;
+}
+
+export interface BatchMetaResultItem {
+  id: string;
+  name?: string;
+  emoji?: string;
+  error?: string;
+}
+
 export type AIProvider = 'openai' | 'azure' | 'gemini' | 'deepseek' | 'qwen' | 'custom' | 'local-claude' | 'local-codex';
 
 /**
@@ -266,6 +278,58 @@ export class AIService {
       void vscode.window.showWarningMessage(`AI 元信息生成失败：${(e as Error).message}`);
       return {};
     }
+  }
+
+  async generateMetaBatch(items: BatchMetaRequestItem[]): Promise<BatchMetaResultItem[]> {
+    const providerRaw = this.config.get<string>('ai.provider', '').trim();
+    if (!providerRaw) {
+      void vscode.window.showWarningMessage('尚未配置 AI 提供商，请先运行「Prompt Hub: 配置向导」或在设置中配置 promptHub.ai.provider。');
+      return items.map((i) => ({ id: i.id, error: '未配置 AI 提供商' }));
+    }
+
+    const provider = providerRaw as AIProvider;
+    const supportedProviders: AIProvider[] = ['openai', 'azure', 'gemini', 'deepseek', 'qwen', 'custom', 'local-claude', 'local-codex'];
+
+    if (!supportedProviders.includes(provider)) {
+      void vscode.window.showWarningMessage(`不支持的 AI 提供商：${provider}`);
+      return items.map((i) => ({ id: i.id, error: `不支持的 AI 提供商：${provider}` }));
+    }
+
+    if (provider === 'local-claude') {
+      try {
+        return await this.localClaudeProvider.generateMetaBatch(items);
+      } catch (error) {
+        void vscode.window.showWarningMessage(`本地 Claude Code 调用失败：${(error as Error).message}`);
+        return items.map((i) => ({ id: i.id, error: `本地 Claude Code 调用失败：${(error as Error).message}` }));
+      }
+    }
+
+    if (provider === 'local-codex') {
+      try {
+        return await this.localCodexProvider.generateMetaBatch(items);
+      } catch (error) {
+        void vscode.window.showWarningMessage(`本地 Codex 调用失败：${(error as Error).message}`);
+        return items.map((i) => ({ id: i.id, error: `本地 Codex 调用失败：${(error as Error).message}` }));
+      }
+    }
+
+    const results: BatchMetaResultItem[] = [];
+    const delayMs = this.config.get<number>('ai.batchDelayMs', 500);
+    for (let index = 0; index < items.length; index++) {
+      const item = items[index];
+      try {
+        const meta = await this.generateMeta(item.content);
+        results.push({ id: item.id, name: meta.name, emoji: meta.emoji });
+      } catch (error) {
+        results.push({ id: item.id, error: error instanceof Error ? error.message : String(error) });
+      }
+
+      if (delayMs > 0 && index < items.length - 1) {
+        await new Promise((resolve) => setTimeout(resolve, delayMs));
+      }
+    }
+
+    return results;
   }
 
   async optimize(content: string): Promise<string> {

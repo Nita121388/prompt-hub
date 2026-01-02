@@ -323,18 +323,95 @@ export class PromptStorageService {
 
     let imported = 0;
     for (const file of files) {
-      // 已有相同 sourceFile 的记录则跳过
-      if (this.prompts.some((p) => p.sourceFile === file)) {
-        continue;
-      }
-
       try {
         const text = await fs.readFile(file, 'utf-8');
         const parsed = parser.parse(text);
         const stat = await fs.stat(file);
 
+        const parsedId = typeof parsed.id === 'string' ? parsed.id.trim() : '';
+
+        // 已记录 sourceFile 的 Markdown：通常无需导入；但如果历史上因 ID 冲突生成了“新 ID”，需要修复关联，避免 TreeView 出现两个
+        const existingBySource = this.prompts.find((p) => p.sourceFile === file);
+        if (existingBySource) {
+          if (parsedId && existingBySource.id !== parsedId) {
+            const correct = this.prompts.find((p) => p.id === parsedId);
+            if (correct && correct !== existingBySource) {
+              if (correct.sourceFile && correct.sourceFile !== file) {
+                console.warn(
+                  `[PromptStorageService] Markdown ID=${parsedId} 已绑定到其他文件，跳过合并: ${file} (existing: ${correct.sourceFile})`
+                );
+              } else {
+                if (!correct.sourceFile) {
+                  correct.sourceFile = file;
+                }
+                if (!correct.name?.trim()) {
+                  correct.name = parsed.name?.trim() || path.basename(file, path.extname(file));
+                }
+                if (!correct.emoji && parsed.emoji) {
+                  correct.emoji = parsed.emoji;
+                }
+                if (!correct.content?.trim()) {
+                  correct.content = (parsed.content || text).trim();
+                }
+                if ((!correct.tags || correct.tags.length === 0) && parsed.tags) {
+                  correct.tags = parsed.tags;
+                }
+                correct.updatedAt = stat.mtime.toISOString();
+
+                this.prompts = this.prompts.filter((p) => p !== existingBySource);
+                imported += 1;
+                console.warn(
+                  `[PromptStorageService] 修复 Markdown ID 关联冲突，已合并并移除重复项: ${file} (${existingBySource.id} -> ${parsedId})`
+                );
+              }
+            } else if (!correct) {
+              // 若没有同 ID 的 Prompt，且不会与现有 ID 冲突，则直接修正当前记录的 id 与 Markdown 一致
+              const oldId = existingBySource.id;
+              if (!this.prompts.some((p) => p.id === parsedId)) {
+                existingBySource.id = parsedId;
+                existingBySource.updatedAt = stat.mtime.toISOString();
+                imported += 1;
+                console.warn(
+                  `[PromptStorageService] 修复 Markdown ID 与记录不一致: ${file} (${oldId} -> ${parsedId})`
+                );
+              }
+            }
+          }
+          continue;
+        }
+
+        if (parsedId) {
+          const existing = this.prompts.find((p) => p.id === parsedId);
+          if (existing) {
+            // 同 ID 的 Prompt 已存在：优先“补齐 sourceFile”，避免导入重复项造成 TreeView 显示两个
+            if (!existing.sourceFile) {
+              existing.sourceFile = file;
+              if (!existing.name?.trim()) {
+                existing.name = parsed.name?.trim() || path.basename(file, path.extname(file));
+              }
+              if (!existing.emoji && parsed.emoji) {
+                existing.emoji = parsed.emoji;
+              }
+              if (!existing.content?.trim()) {
+                existing.content = (parsed.content || text).trim();
+              }
+              if ((!existing.tags || existing.tags.length === 0) && parsed.tags) {
+                existing.tags = parsed.tags;
+              }
+              existing.updatedAt = stat.mtime.toISOString();
+              imported += 1;
+              console.log(`[PromptStorageService] 已关联同 ID Markdown Prompt: ${existing.name} (${file})`);
+            } else if (existing.sourceFile !== file) {
+              console.warn(
+                `[PromptStorageService] 检测到重复 Prompt ID=${parsedId}，已忽略 Markdown 文件: ${file} (existing: ${existing.sourceFile})`
+              );
+            }
+            continue;
+          }
+        }
+
         const prompt: Prompt = {
-          id: parsed.id || this.makeUniqueId(),
+          id: parsedId || this.makeUniqueId(),
           name: parsed.name?.trim() || path.basename(file, path.extname(file)),
           emoji: parsed.emoji,
           content: (parsed.content || text).trim(),
@@ -343,11 +420,6 @@ export class PromptStorageService {
           sourceFile: file,
           tags: parsed.tags ?? [],
         };
-
-        // 若 ID 冲突则生成新的 ID，避免覆盖已有数据
-        if (this.prompts.some((p) => p.id === prompt.id)) {
-          prompt.id = this.makeUniqueId();
-        }
 
         this.prompts.push(prompt);
         imported += 1;
@@ -405,6 +477,7 @@ export class PromptStorageService {
   private async collectMarkdownFiles(root: string): Promise<string[]> {
     const result: string[] = [];
     const ignoreDirs = new Set(['.git', 'node_modules', '.vscode', '.obsidian']);
+    const ignoreDirPrefixes = ['.prompt-hub-backup-'];
 
     const walk = async (dir: string) => {
       let entries: Dirent[];
@@ -419,6 +492,7 @@ export class PromptStorageService {
         const fullPath = path.join(dir, entry.name);
         if (entry.isDirectory()) {
           if (ignoreDirs.has(entry.name)) continue;
+          if (ignoreDirPrefixes.some((prefix) => entry.name.startsWith(prefix))) continue;
           await walk(fullPath);
         } else if (entry.isFile() && entry.name.toLowerCase().endsWith('.md')) {
           result.push(fullPath);
@@ -493,9 +567,17 @@ export class PromptStorageService {
     const kept: Prompt[] = [];
     let removed = 0;
 
+    const isBackupPath = (filePath: string) => /(^|[\\/])\.prompt-hub-backup-/.test(filePath);
+
     for (const p of this.prompts) {
       if (!p.sourceFile) {
         kept.push(p);
+        continue;
+      }
+
+      if (isBackupPath(p.sourceFile)) {
+        removed += 1;
+        console.warn('[PromptStorageService] 源文件位于备份目录，已忽略 Prompt:', p.name, '(', p.sourceFile, ')');
         continue;
       }
 

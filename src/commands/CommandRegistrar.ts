@@ -1,8 +1,5 @@
 import * as vscode from 'vscode';
-import * as os from 'os';
 import * as path from 'path';
-import * as cp from 'child_process';
-import * as util from 'util';
 import Fuse from 'fuse.js';
 import { PromptStorageService } from '../services/PromptStorageService';
 import { ConfigurationService } from '../services/ConfigurationService';
@@ -20,56 +17,6 @@ import { UsageLogService } from '../services/UsageLogService';
  * 命令注册器：负责注册所有 Prompt Hub 相关命令并实现具体逻辑
  */
 export class CommandRegistrar {
-  /** 将 child_process.exec 封装为 Promise，方便在命令中调用 CLI */
-  private readonly exec = util.promisify(cp.exec);
-
-  /** 带环境变量的 exec 封装，包含超时处理 */
-  private readonly execWithEnv = (command: string, env: NodeJS.ProcessEnv, timeout: number = 60000): Promise<{ stdout: string; stderr: string }> => {
-    return new Promise((resolve, reject) => {
-      console.log(`[PromptHub][execWithEnv] 执行命令: ${command}`);
-      console.log(`[PromptHub][execWithEnv] 超时设置: ${timeout}ms`);
-
-      const child = cp.exec(command, {
-        env,
-        encoding: 'utf8'
-      }, (error, stdout, stderr) => {
-        if (error) {
-          console.error(`[PromptHub][execWithEnv] 命令执行错误:`, error);
-          reject(error);
-        } else {
-          console.log(`[PromptHub][execWithEnv] 命令执行成功，stdout长度: ${stdout?.length || 0}, stderr长度: ${stderr?.length || 0}`);
-          resolve({ stdout: stdout || '', stderr: stderr || '' });
-        }
-      });
-
-      // 设置超时
-      const timer = setTimeout(() => {
-        console.error(`[PromptHub][execWithEnv] 命令执行超时 (${timeout}ms)`);
-        child.kill('SIGTERM');
-        reject(new Error(`命令执行超时 (${timeout}ms)`));
-      }, timeout);
-
-      // 监听进程退出
-      child.on('exit', (code, signal) => {
-        clearTimeout(timer);
-        console.log(`[PromptHub][execWithEnv] 进程退出，code: ${code}, signal: ${signal}`);
-      });
-
-      // 监听输出
-      if (child.stdout) {
-        child.stdout.on('data', (data) => {
-          console.log(`[PromptHub][execWithEnv] stdout:`, data.toString().trim());
-        });
-      }
-
-      if (child.stderr) {
-        child.stderr.on('data', (data) => {
-          console.log(`[PromptHub][execWithEnv] stderr:`, data.toString().trim());
-        });
-      }
-    });
-  };
-
   constructor(
     private readonly context: vscode.ExtensionContext,
     private readonly storageService: PromptStorageService,
@@ -544,7 +491,7 @@ export class CommandRegistrar {
     await this.refreshAfterGit();
     if (importBackupDir) {
       void vscode.window.showWarningMessage(
-        `Prompt Hub: 导入前已将现有文件备份到：${importBackupDir}`
+        `Prompt Hub: 导入过程中检测到文件冲突，已临时备份相关文件到：${importBackupDir}（导入后已尽量恢复；若同名冲突会自动改名保留，详情见日志）`
       );
     }
     void vscode.window.showInformationMessage('Prompt Hub: Git 同步完成。');
@@ -554,6 +501,97 @@ export class CommandRegistrar {
   private async gitPull(): Promise<void> {
     const git = new GitSyncService(this.configService);
     let importBackupDir: string | null = null;
+    let preserveUntrackedBackupDir: string | null = null;
+    let preserveUntrackedConflicts = 0;
+    const debugLogEnabled = this.configService.get<boolean>('git.debugLog', false);
+    const logDebug = (...args: any[]) => {
+      if (!debugLogEnabled) return;
+      console.log('[CommandRegistrar][GitPull]', ...args);
+    };
+
+    logDebug('开始执行 Git 拉取/导入');
+    const isRepo = await git.isGitRepo();
+    logDebug('isGitRepo =', isRepo);
+    const remoteUrl = await this.ensureRemoteUrlForImport(git, {
+      allowSkipIfOriginExists: isRepo,
+    });
+    logDebug('remoteUrl 已获取（为避免泄露凭据，此处不输出 URL 明文）:', Boolean(remoteUrl));
+
+    if (!remoteUrl) {
+      logDebug('用户取消 remoteUrl 输入/选择，终止');
+      throw new Error(isRepo ? '已取消 Git 拉取。' : '已取消 Git 导入。');
+    }
+
+    type PullStrategy = 'rebase' | 'force' | 'preserveUntracked';
+    let strategy: PullStrategy = 'rebase';
+
+    if (isRepo) {
+      const status = await git.status();
+      const isDirty = Boolean(status.trim());
+      logDebug('检测工作区是否干净 isDirty =', isDirty);
+      if (debugLogEnabled && isDirty) {
+        const statusLines = status
+          .split(/\r?\n/)
+          .map((l) => l.trim())
+          .filter(Boolean);
+        logDebug('statusLines =', statusLines.length, '示例 =', statusLines.slice(0, 20).join(' | '));
+      }
+
+      if (isDirty) {
+        const picked = await vscode.window.showQuickPick(
+          [
+            {
+              id: 'rebase' as const,
+              label: '保留本地改动并拉取（推荐）',
+              description: 'git pull --rebase（默认带 --autostash），可能出现冲突',
+            },
+            {
+              id: 'preserveUntracked' as const,
+              label: '保留本地未跟踪文件，仅恢复远端内容',
+              description: '备份未跟踪文件 → 丢弃其它改动 → 以远端为准恢复',
+            },
+            {
+              id: 'force' as const,
+              label: '以远端覆盖本地（危险）',
+              description: '丢弃所有未提交改动（包含新建文件）',
+            },
+          ],
+          {
+            title: 'Prompt Hub: 选择 Git 拉取策略',
+            placeHolder: '检测到本地有未提交改动，请选择要怎么处理',
+            ignoreFocusOut: true,
+          }
+        );
+
+        if (!picked) {
+          logDebug('用户取消策略选择，终止');
+          return;
+        }
+
+        strategy = picked.id;
+        logDebug('用户选择策略 =', strategy);
+
+        if (strategy === 'force') {
+          const confirm = await vscode.window.showWarningMessage(
+            '将以远端为准覆盖本地：会丢弃 storagePath 下所有未提交改动，并可能删除未跟踪文件。建议先备份你要保留的 Prompt。',
+            { modal: true },
+            '继续',
+            '取消'
+          );
+          if (confirm !== '继续') return;
+        }
+
+        if (strategy === 'preserveUntracked') {
+          const confirm = await vscode.window.showWarningMessage(
+            '将保留未跟踪文件（未提交的新文件），但会丢弃其它未提交改动（包括删除/修改）。随后会按远端最新内容恢复工作区。',
+            { modal: true },
+            '继续',
+            '取消'
+          );
+          if (confirm !== '继续') return;
+        }
+      }
+    }
 
     await vscode.window.withProgress(
       {
@@ -561,20 +599,29 @@ export class CommandRegistrar {
         title: 'Prompt Hub: 正在拉取/导入远端内容...',
       },
       async () => {
-        if (!(await git.isGitRepo())) {
-          const remoteUrl = await this.ensureRemoteUrlForImport(git);
-          if (!remoteUrl) {
-            throw new Error('已取消 Git 导入。');
-          }
+        if (!isRepo) {
+          logDebug('当前目录非 Git 仓库，进入 importFromRemote()');
           await git.importFromRemote(remoteUrl);
           importBackupDir = git.getLastImportBackupDir();
           return;
         }
 
-        // 已是仓库：直接 pull（若缺少 origin，会走 importFromRemote 的补齐逻辑）
-        const remoteUrl = await this.ensureRemoteUrlForImport(git, {
-          allowSkipIfOriginExists: true,
-        });
+        if (strategy === 'force') {
+          logDebug('执行 forceResetToRemote()（危险：丢弃本地未提交改动）');
+          await git.forceResetToRemote(remoteUrl ?? undefined);
+          return;
+        }
+
+        if (strategy === 'preserveUntracked') {
+          logDebug('执行 restoreRemotePreserveUntracked()（保留未跟踪文件，恢复远端）');
+          const result = await git.restoreRemotePreserveUntracked(remoteUrl ?? undefined);
+          preserveUntrackedBackupDir = result.backupDir;
+          preserveUntrackedConflicts = result.conflicts;
+          logDebug('restoreRemotePreserveUntracked() 完成，backupDir =', result.backupDir, 'restored =', result.restored, 'conflicts =', result.conflicts);
+          return;
+        }
+
+        logDebug('执行 pullRebase()（默认带 --autostash）');
         await git.pullRebase(remoteUrl ?? undefined);
       }
     );
@@ -582,8 +629,19 @@ export class CommandRegistrar {
     await this.refreshAfterGit();
     if (importBackupDir) {
       void vscode.window.showWarningMessage(
-        `Prompt Hub: 导入前已将现有文件备份到：${importBackupDir}`
+        `Prompt Hub: 导入过程中检测到文件冲突，已临时备份相关文件到：${importBackupDir}（导入后已尽量恢复；若同名冲突会自动改名保留，详情见日志）`
       );
+    }
+    if (preserveUntrackedBackupDir) {
+      if (preserveUntrackedConflicts > 0) {
+        void vscode.window.showWarningMessage(
+          `Prompt Hub: 已恢复远端内容并保留本地未跟踪文件，但有 ${preserveUntrackedConflicts} 个文件与远端同名，已自动改名保留。备份目录：${preserveUntrackedBackupDir}`
+        );
+      } else {
+        void vscode.window.showInformationMessage(
+          `Prompt Hub: 已恢复远端内容并保留本地未跟踪文件。备份目录：${preserveUntrackedBackupDir}`
+        );
+      }
     }
 
     const count = this.storageService.list().length;
@@ -615,8 +673,109 @@ export class CommandRegistrar {
     try {
       await this.storageService.refresh();
       this.treeProvider.refresh();
+      await this.logGitAndPromptDiagnosticsAfterRefresh();
     } catch (error) {
       console.error('[CommandRegistrar] Git 操作后刷新失败:', error);
+    }
+  }
+
+  private async logGitAndPromptDiagnosticsAfterRefresh(): Promise<void> {
+    const debugLogEnabled = this.configService.get<boolean>('git.debugLog', false);
+    if (!debugLogEnabled) return;
+
+    const storagePath = this.configService.getStoragePath();
+    const prompts = this.storageService.list();
+
+    const normalizeSep = (p: string) => (p || '').replace(/\\/g, '/');
+    const isBackupPath = (p: string) => /(^|[\\/])\.prompt-hub-backup-\d{8}-\d{6}([\\/]|$)/.test(p);
+
+    const relPath = (abs: string | undefined) => {
+      if (!abs) return '';
+      const r = path.relative(storagePath, abs);
+      return r && !r.startsWith('..') && !path.isAbsolute(r) ? r : abs;
+    };
+
+    console.log('[CommandRegistrar][GitDiagnostics] storagePath =', storagePath);
+    console.log('[CommandRegistrar][GitDiagnostics] prompts =', prompts.length);
+
+    const promptsWithSource = prompts.filter((p) => Boolean(p.sourceFile));
+    const backupPrompts = promptsWithSource.filter((p) => isBackupPath(p.sourceFile!));
+    console.log(
+      '[CommandRegistrar][GitDiagnostics] promptsWithSource =',
+      promptsWithSource.length,
+      'backupPrompts =',
+      backupPrompts.length
+    );
+
+    // 重复项诊断：同名（含 emoji）在 UI 上最容易被误认为“重复”
+    const byDisplayName = new Map<string, Prompt[]>();
+    for (const p of prompts) {
+      const display = `${p.emoji ? `${p.emoji} ` : ''}${p.name || ''}`.trim();
+      const list = byDisplayName.get(display) ?? [];
+      list.push(p);
+      byDisplayName.set(display, list);
+    }
+
+    const duplicates = Array.from(byDisplayName.entries())
+      .filter(([, list]) => list.length > 1)
+      .sort((a, b) => b[1].length - a[1].length);
+
+    if (duplicates.length > 0) {
+      console.log('[CommandRegistrar][GitDiagnostics] 重复显示名数量 =', duplicates.length);
+      for (const [display, list] of duplicates.slice(0, 10)) {
+        const items = list
+          .map((p) => {
+            const src = p.sourceFile ? normalizeSep(relPath(p.sourceFile)) : '(无 sourceFile)';
+            const mark = p.sourceFile && isBackupPath(p.sourceFile) ? ' [backup]' : '';
+            return `${p.id} -> ${src}${mark}`;
+          })
+          .join(' | ');
+        console.log(`[CommandRegistrar][GitDiagnostics] DUP "${display}" x${list.length}:`, items);
+      }
+    }
+
+    // Git 状态辅助验证：哪些文件是本地新建/未跟踪（远端不可能“凭空出现”）
+    const git = new GitSyncService(this.configService);
+    const isRepo = await git.isGitRepo();
+    console.log('[CommandRegistrar][GitDiagnostics] isGitRepo =', isRepo);
+    if (!isRepo) return;
+
+    try {
+      const status = await git.status();
+      const lines = status
+        .split(/\r?\n/)
+        .map((l) => l.trimEnd())
+        .filter(Boolean);
+
+      const untracked = lines.filter((l) => l.startsWith('?? '));
+      const deleted = lines.filter((l) => l.startsWith(' D ') || l.startsWith('D  ') || l.startsWith('DD ') || l.startsWith('UD '));
+
+      console.log(
+        '[CommandRegistrar][GitDiagnostics] git status --porcelain lines =',
+        lines.length,
+        'untracked =',
+        untracked.length,
+        'deleted =',
+        deleted.length
+      );
+      if (untracked.length > 0) {
+        console.log('[CommandRegistrar][GitDiagnostics] untracked 示例 =', untracked.slice(0, 20).join(' | '));
+      }
+      if (deleted.length > 0) {
+        console.log('[CommandRegistrar][GitDiagnostics] deleted 示例 =', deleted.slice(0, 20).join(' | '));
+      }
+
+      if (backupPrompts.length > 0) {
+        console.log(
+          '[CommandRegistrar][GitDiagnostics] backupPrompts 示例 =',
+          backupPrompts
+            .slice(0, 10)
+            .map((p) => normalizeSep(relPath(p.sourceFile!)))
+            .join(' | ')
+        );
+      }
+    } catch (err) {
+      console.warn('[CommandRegistrar][GitDiagnostics] 获取 git status 失败:', err);
     }
   }
 
@@ -879,63 +1038,6 @@ export class CommandRegistrar {
   //     );
   //   }
   // }
-
-    /** 简单的 CLI 调用 Demo：执行本地 AI CLI 并展示结果 */
-  private async cliDemo(): Promise<void> {
-    // 从配置读取要执行的命令：promptHub.cliDemo.command
-    const command = this.configService.get<string>('cliDemo.command', '').trim();
-
-    console.log('[PromptHub][cliDemo] 使用命令:', command);
-
-    if (!command) {
-      void vscode.window.showWarningMessage(
-        '尚未配置 CLI Demo 命令，请在设置中搜索 "Prompt Hub: CLI Demo" 并填写要执行的命令行。'
-      );
-      return;
-    }
-
-    try {
-      // 设置 Claude CLI 所需的环境变量
-      const env = {
-        ...process.env,
-        ANTHROPIC_AUTH_TOKEN: 'sk_3eb56bdff5b7ef0d39976039db7bbe6789bbe5451b9bd4bb549c087b00077ba9',
-        ANTHROPIC_BASE_URL: 'http://www.claudecodeserver.top/api'
-      };
-
-      console.log('[PromptHub][cliDemo] 设置环境变量:', {
-        ANTHROPIC_AUTH_TOKEN: env.ANTHROPIC_AUTH_TOKEN ? env.ANTHROPIC_AUTH_TOKEN  : '未设置',
-        ANTHROPIC_BASE_URL: env.ANTHROPIC_BASE_URL
-      });
-
-      console.log('[PromptHub][cliDemo] 开始执行命令...');
-      const startTime = Date.now();
-
-      // 使用带环境变量的 exec 执行命令，设置30秒超时
-      const { stdout, stderr } = await this.execWithEnv(command, env, 30000);
-
-      const executionTime = Date.now() - startTime;
-      console.log(`[PromptHub][cliDemo] 命令执行完成，耗时: ${executionTime}ms`);
-      const output = [
-        `命令: ${command}`,
-        `环境变量: ANTHROPIC_AUTH_TOKEN=***, ANTHROPIC_BASE_URL=${env.ANTHROPIC_BASE_URL}`,
-        `stdout: ${stdout.trim() || '(空)'}`,
-        stderr.trim() ? `stderr: ${stderr.trim()}` : '',
-      ]
-        .filter(Boolean)
-        .join('\n');
-
-      console.log('[PromptHub][cliDemo] 输出:', output);
-      void vscode.window.showInformationMessage(output, { modal: true });
-    } catch (error) {
-      console.error('[PromptHub][cliDemo] 调用失败:', error);
-      void vscode.window.showErrorMessage(
-        `CLI 调用 Demo 失败：${
-          error instanceof Error ? error.message : String(error)
-        }`
-      );
-    }
-  }
-
   /**
    * 批量为所有 Prompt 生成 emoji 和 Name
    *
@@ -1001,6 +1103,12 @@ export class CommandRegistrar {
           cancellable: true,
         },
         async (progress, token) => {
+          progress.report({ message: '正在调用 AI（批处理）...' });
+
+          const batchItems = needsGeneration.map((p) => ({ id: p.id, content: p.content }));
+          const batchResults = await ai.generateMetaBatch(batchItems);
+          const byId = new Map(batchResults.map((r) => [r.id, r]));
+
           for (let i = 0; i < needsGeneration.length; i++) {
             // 检查用户是否取消
             if (token.isCancellationRequested) {
@@ -1009,29 +1117,27 @@ export class CommandRegistrar {
             }
 
             const prompt = needsGeneration[i];
+            const meta = byId.get(prompt.id);
+
+            if (!meta || (!meta.name && !meta.emoji)) {
+              failureCount++;
+              failedPrompts.push(prompt.name || `Prompt_${i}`);
+              continue;
+            }
+
+            const nextName = meta.name?.trim() ? meta.name.trim() : (prompt.name || `Prompt_${i}`);
+            const nextEmoji = meta.emoji !== undefined ? meta.emoji : prompt.emoji;
+
+            // 更新 Prompt
+            const updated: Prompt = {
+              ...prompt,
+              name: nextName,
+              emoji: nextEmoji,
+              updatedAt: new Date().toISOString(),
+              aiGeneratedMeta: true, // 标记为 AI 生成
+            };
 
             try {
-              // 调用 AI 生成元信息
-              const meta = await ai.generateMeta(prompt.content);
-
-              if (!meta.name && !meta.emoji) {
-                failureCount++;
-                failedPrompts.push(prompt.name || `Prompt_${i}`);
-                continue;
-              }
-
-              const nextName = meta.name?.trim() ? meta.name.trim() : (prompt.name || `Prompt_${i}`);
-              const nextEmoji = meta.emoji !== undefined ? meta.emoji : prompt.emoji;
-
-              // 更新 Prompt
-              const updated: Prompt = {
-                ...prompt,
-                name: nextName,
-                emoji: nextEmoji,
-                updatedAt: new Date().toISOString(),
-                aiGeneratedMeta: true, // 标记为 AI 生成
-              };
-
               // 保存到存储
               await this.storageService.update(updated);
 
@@ -1055,11 +1161,6 @@ export class CommandRegistrar {
               increment: 100 / needsGeneration.length,
               message: `已处理 ${i + 1}/${needsGeneration.length} (${Math.round(percentage)}%)`,
             });
-
-            // 避免 API 速率限制，添加延迟
-            // 可通过配置 promptHub.ai.batchDelayMs 调整
-            const delayMs = this.configService.get<number>('ai.batchDelayMs', 500);
-            await this.delay(delayMs);
           }
         }
       );
@@ -1159,32 +1260,38 @@ export class CommandRegistrar {
           cancellable: true,
         },
         async (progress, token) => {
+          progress.report({ message: '正在调用 AI（批处理）...' });
+
+          const batchItems = selectedPrompts.map((p) => ({ id: p.id, content: p.content }));
+          const batchResults = await ai.generateMetaBatch(batchItems);
+          const byId = new Map(batchResults.map((r) => [r.id, r]));
+
           for (let i = 0; i < selectedPrompts.length; i++) {
             if (token.isCancellationRequested) {
               break;
             }
 
             const prompt = selectedPrompts[i];
+            const meta = byId.get(prompt.id);
+
+            if (!meta || (!meta.name && !meta.emoji)) {
+              failureCount++;
+              continue;
+            }
+
+            const nextName = meta.name?.trim() ? meta.name.trim() : (prompt.name || `Prompt_${i}`);
+            const nextEmoji = meta.emoji !== undefined ? meta.emoji : prompt.emoji;
+
+            const updated: Prompt = {
+              ...prompt,
+              name: nextName,
+              emoji: nextEmoji,
+              updatedAt: new Date().toISOString(),
+              aiGeneratedMeta: true,
+            };
 
             try {
-              const meta = await ai.generateMeta(prompt.content);
-              if (!meta.name && !meta.emoji) {
-                failureCount++;
-                continue;
-              }
-
-              const nextName = meta.name?.trim() ? meta.name.trim() : (prompt.name || `Prompt_${i}`);
-              const nextEmoji = meta.emoji !== undefined ? meta.emoji : prompt.emoji;
-
-              const updated: Prompt = {
-                ...prompt,
-                name: nextName,
-                emoji: nextEmoji,
-                updatedAt: new Date().toISOString(),
-                aiGeneratedMeta: true,
-              };
               await this.storageService.update(updated);
-
               if (updated.sourceFile) {
                 await this.updateMarkdownHeader(updated.sourceFile, updated.name, updated.emoji);
               }
@@ -1198,9 +1305,6 @@ export class CommandRegistrar {
               increment: 100 / selectedPrompts.length,
               message: `已处理 ${i + 1}/${selectedPrompts.length}`,
             });
-
-            const delayMs = this.configService.get<number>('ai.batchDelayMs', 500);
-            await this.delay(delayMs);
           }
         }
       );
@@ -1433,6 +1537,14 @@ export class CommandRegistrar {
           cancellable: true,
         },
         async (progress, token) => {
+          progress.report({ message: '正在调用 AI（批处理）...' });
+          const batchStartedAt = Date.now();
+          const batchItems = selectedPrompts.map((p) => ({ id: p.id, content: p.content }));
+          const batchResults = await ai.generateMetaBatch(batchItems);
+          const batchDurationMs = Date.now() - batchStartedAt;
+          const byId = new Map(batchResults.map((r) => [r.id, r]));
+          const perItemDurationMs = selectedPrompts.length ? Math.round(batchDurationMs / selectedPrompts.length) : 0;
+
           for (let i = 0; i < selectedPrompts.length; i++) {
             // 检查用户是否取消
             if (token.isCancellationRequested) {
@@ -1441,13 +1553,12 @@ export class CommandRegistrar {
             }
 
             const prompt = selectedPrompts[i];
-            const start = Date.now();
 
             try {
               // 调用 AI 生成元信息
-              const meta = await ai.generateMeta(prompt.content);
+              const meta = byId.get(prompt.id);
 
-              if (!meta.name && !meta.emoji) {
+              if (!meta || (!meta.name && !meta.emoji)) {
                 const usage = new UsageLogService(this.configService);
                 await usage.record({
                   id: generateId(),
@@ -1455,8 +1566,8 @@ export class CommandRegistrar {
                   operation: 'meta',
                   promptId: prompt.id,
                   status: 'failed',
-                  durationMs: Date.now() - start,
-                  message: 'AI 未返回可用的标题/emoji（可能未配置或调用失败）',
+                  durationMs: perItemDurationMs,
+                  message: meta?.error || 'AI 未返回可用的标题/emoji（可能未配置或调用失败）',
                 });
 
                 failureCount++;
@@ -1476,7 +1587,7 @@ export class CommandRegistrar {
                   operation: 'meta',
                   promptId: prompt.id,
                   status: 'success',
-                  durationMs: Date.now() - start,
+                  durationMs: perItemDurationMs,
                   message: 'AI 返回的唤醒词与当前一致，无需更新',
                 });
 
@@ -1508,7 +1619,7 @@ export class CommandRegistrar {
                 operation: 'meta',
                 promptId: updated.id,
                 status: 'success',
-                durationMs: Date.now() - start,
+                durationMs: perItemDurationMs,
               });
 
               successCount++;
@@ -1520,7 +1631,7 @@ export class CommandRegistrar {
                 operation: 'meta',
                 promptId: prompt.id,
                 status: 'failed',
-                durationMs: Date.now() - start,
+                durationMs: perItemDurationMs,
                 message: error instanceof Error ? error.message : String(error),
               });
 
@@ -1538,10 +1649,6 @@ export class CommandRegistrar {
               increment: 100 / selectedPrompts.length,
               message: `已处理 ${i + 1}/${selectedPrompts.length} (${Math.round(percentage)}%)`,
             });
-
-            // 避免 API 速率限制，添加延迟
-            const delayMs = this.configService.get<number>('ai.batchDelayMs', 500);
-            await this.delay(delayMs);
           }
         }
       );
