@@ -78,6 +78,60 @@
 2. 在下拉菜单中选择 `Extension Host`
 3. 查看控制台输出
 
+## Git 拉取/导入/同步调试（建议开启）
+
+当你遇到以下问题时：
+
+- “Git 拉取/导入”提示 `cannot pull with rebase: You have unstaged changes`
+- 误删本地文件后，拉取似乎“拉不下来”/远端文件没恢复
+- 拉取策略选择后结果与预期不一致
+
+建议开启更详细的 Git 诊断日志：
+
+1. 打开 VS Code 设置，搜索 `promptHub.git.debugLog` 并开启
+2. 重新执行一次相关命令：
+   - “Git 拉取/导入”
+   - “Git 同步”
+3. 在日志中重点关注两类前缀：
+   - `[CommandRegistrar][GitPull]`：记录 UI 选择的拉取策略与关键分支决策（不会输出远程 URL 明文，避免泄露凭据）
+   - `[GitSyncService]` / `[GitSyncService][诊断]`：记录实际执行的 git 命令与仓库诊断快照
+
+### “Git 拉取/导入”三种策略说明（会出现在弹窗里）
+
+当检测到本地存在未提交改动时，会提示你选择策略：
+
+1. **保留本地改动并拉取（推荐）**
+   - 行为：`git pull --rebase`（默认带 `--autostash`）
+   - 适合：你想保留本地新增/修改的 Prompt，同时合并远端更新
+   - 风险：可能出现冲突；如果本地“删除文件”很多，删除也会被保留，导致远端文件恢复后又被本地删除覆盖
+
+2. **保留本地未跟踪文件，仅恢复远端内容**
+   - 行为：备份未跟踪文件 → 丢弃其它未提交改动（包括删除/修改）→ 以远端为准恢复 → 再把未跟踪文件放回
+   - 适合：你误删了大量文件，但只想保留你新建的那个 Prompt 文件，同时把远端文件完整恢复下来
+   - 风险：若未跟踪文件与远端同名，会自动改名保留；备份目录会打印在日志/提示中便于回溯
+
+3. **以远端覆盖本地（危险）**
+   - 行为：丢弃所有未提交改动并清理未跟踪文件，最终工作区与远端一致
+   - 适合：你确认不需要保留本地任何改动，只要“回到远端最新”
+   - 风险：可能造成数据不可逆丢失（包含你新建的 Prompt 文件），务必先自行备份
+
+## 本地 Claude/Codex 终端自检（无需打开 VSCode）
+
+为方便定位“本地 Claude Code / 本地 Codex 调用失败”的问题，项目提供一个可直接在终端运行的诊断脚本：`scripts/ai-doctor.js`。
+
+- 仅探测路径（无网络/无调用副作用）：
+  - `cd upstream && npm run ai:doctor`
+  - （在仓库根目录执行）`pnpm -C upstream run ai:doctor`
+  - （已在 upstream 目录内）`pnpm run ai:doctor`
+
+- 真实执行一次最小调用（会触发 CLI 自身的登录/网络行为）：
+  - `cd upstream && npm run ai:doctor:probe`
+  - （在仓库根目录执行）`pnpm -C upstream run ai:doctor:probe`
+  - （已在 upstream 目录内）`pnpm run ai:doctor:probe`
+  - 自定义超时：`node upstream/scripts/ai-doctor.js --probe --timeout-ms 300000`
+
+如果 Claude 输出提示需要登录/授权，建议先在终端手动运行：`claude -p "你好"` 完成登录。
+
 ## 完整的执行流程
 
 正常情况下,新建Prompt的日志应该按以下顺序出现:

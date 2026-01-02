@@ -221,6 +221,7 @@
 - `promptHub.markdown.mirrorDirectory`：镜像文件目录
 - `promptHub.markdown.filenameTemplate`：文件名模板
 - `promptHub.markdown.askForFilename`：创建时询问文件名
+- `promptHub.markdown.autoRenameOnSave`：保存时是否按标题自动重命名文件（可在 frontmatter 用 `rename: false` 禁用）
 
 **Git 同步**：
 - `promptHub.git.enableSync`：启用 Git 同步功能

@@ -28,7 +28,9 @@ VSCode Extension Host
 | **PromptStorageService** | 以 JSON 为主存，负责 CRUD、导入导出、与 Markdown 镜像的同步 | `list()`, `save(prompt)`, `remove(id)`, `export(format)`, `syncMarkdown()` |
 | **PromptTreeProvider** | 构建树结构，处理复制/编辑/删除/撤销命令 | `getChildren()`, `getTreeItem()`, `refresh(trigger)` |
 | **PromptPaletteProvider** | 命令面板搜索、最近使用排序、快捷操作 | `provideQuickPickItems(filter)` |
-| **AIService** | 统一封装调用接口，生成标题/emoji、优化内容并返回 token 统计 | `generateMeta(content)`, `optimize(content, intent)` |
+| **AIService** | 统一封装调用接口，支持云端 API（OpenAI、Azure 等）和本地 AI（Claude Code、Codex） | `generateMeta(content)`, `optimize(content)` |
+| **LocalClaudeProvider** | 封装本地 Claude Code CLI 调用，无需 API Key | `generateMeta(content)`, `optimize(content)` |
+| **LocalCodexProvider** | 封装本地 Codex 调用，无需 API Key | `generateMeta(content)`, `optimize(content)` |
 | **UsageLogService** | 记录 AI 耗费、失败信息，提供查询与 CSV 导出 | `record(log)`, `query(filter)`, `exportCSV(path)` |
 | **PromptFileService** | 新建 Markdown 模板、自定义文件名、打开编辑器并插入标题 | `createBlankFile(options)`, `appendTitle(fileUri, title)` |
 | **ConfigurationService** | 读取 `promptHub.*` 设置、监听变更、管理 SecretStorage | `get(key)`, `onDidChange(cb)`, `storeSecret(key, value)` |

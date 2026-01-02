@@ -1,8 +1,8 @@
 # Prompt Hub
 
-> VSCode 插件，用于统一管理和组织 AI Prompt，支持本地存储、Git 同步、AI 辅助生成
+> VSCode 插件，用于统一管理和组织 AI Prompt，支持本地存储、Git 同步、AI 辅助生成（开发测试中）
 
-[![Version](https://img.shields.io/badge/version-0.1.0-blue.svg)](https://marketplace.visualstudio.com/items?itemName=your-publisher.prompt-hub)
+[![Version](https://img.shields.io/badge/version-0.1.0-blue.svg)](https://marketplace.visualstudio.com/items?itemName=Nita121388.prompt-hub)
 [![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 
 ## ✨ 功能特性
@@ -82,6 +82,7 @@
 - [需求文档](docs/requirements.md)
 - [设计文档](docs/design.md)
 - [测试计划](docs/test-plan.md)
+- [测试用例](docs/test-cases.md)
 
 ## ⚙️ 配置
 
@@ -107,7 +108,27 @@
 }
 ```
 
+### AI 批量（本地 CLI 合并调用）
+
+```json
+{
+  "promptHub.ai.batchDelayMs": 500,
+  "promptHub.ai.batchChunkSize": 10,
+  "promptHub.ai.batchItemPreviewChars": 600,
+  "promptHub.ai.batchMaxPromptChars": 7000
+}
+```
+
 ## 🛠️ 开发
+
+### 开发测试说明（给参与测试的同学）
+
+- 当前版本处于开发/回归测试阶段，功能、命令与配置项可能会调整（尤其是 AI 相关能力）。
+- 建议使用 Extension Development Host（按 `F5`）或独立的 VSCode Profile/测试环境进行验证，避免影响日常工作环境。
+- 涉及 Git 导入/同步时请使用专门的测试仓库（或 fork），避免误提交到生产仓库；建议操作前备份存储目录。
+- AI 调用可能产生费用：可先在无 Key 情况下回归“提示/回退”类用例，或优先使用本地 Provider（`local-claude` / `local-codex`）验证流程。
+- 手工回归用例：`docs/test-cases.md`；批量生成功能专项：`完整测试指南.md`；本地 AI 调试日志：`docs/DEBUG_LOGGING_SUMMARY.md`。
+- 反馈问题时建议附上：复现步骤、VSCode 版本/OS、相关设置片段，以及 Output 面板 `Prompt Hub` 日志（必要时开启 `promptHub.git.debugLog`）。
 
 ### 环境要求
 
