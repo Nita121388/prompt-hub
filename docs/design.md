@@ -33,7 +33,7 @@ VSCode Extension Host
 | **LocalCodexProvider** | 封装本地 Codex 调用，无需 API Key | `generateMeta(content)`, `optimize(content)` |
 | **UsageLogService** | 记录 AI 耗费、失败信息，提供查询与 CSV 导出 | `record(log)`, `query(filter)`, `exportCSV(path)` |
 | **PromptFileService** | 新建 Markdown 模板、自定义文件名、打开编辑器并插入标题 | `createBlankFile(options)`, `appendTitle(fileUri, title)` |
-| **ConfigurationService** | 读取 `promptHub.*` 设置、监听变更、管理 SecretStorage | `get(key)`, `onDidChange(cb)`, `storeSecret(key, value)` |
+| **ConfigurationService** | 读取 `otter.*` 设置、监听变更、管理 SecretStorage | `get(key)`, `onDidChange(cb)`, `storeSecret(key, value)` |
 | **GitSyncService** | 检测存储目录是否为 Git 仓库，提供 git pull/commit/push 并展示同步状态 | `ensureRepo()`, `pull()`, `commit(message)`, `push()`, `status()` |
 | **OnboardingWizard** | 首次使用引导，5 步向导（欢迎→存储路径→Git→AI→完成） | `start()`, `skipStep()`, `complete()` |
 | **SettingsService** | 快速打开插件配置页面，提供多入口访问 | `openSettings(section?)` |
@@ -127,10 +127,10 @@ Prompt 对象作为 JSON 存储的基本单元。`fromMarkdownFile` 字段用于
 
 ### 4.5 空白 Prompt 模板（F9）
 
-1. 用户通过命令面板或活动栏按钮触发 `promptHub.createBlankPrompt`。
+1. 用户通过命令面板或活动栏按钮触发 `otter.createBlankPrompt`。
 2. `PromptFileService` 生成文件名：
-   - 使用模板：`promptHub.markdown.filenameTemplate`（支持 `{name}`、`{timestamp}`、`{date}`、`{emoji}` 占位符）
-   - 如启用 `promptHub.markdown.askForFilename`，弹出输入框让用户自定义
+   - 使用模板：`otter.markdown.filenameTemplate`（支持 `{name}`、`{timestamp}`、`{date}`、`{emoji}` 占位符）
+   - 如启用 `otter.markdown.askForFilename`，弹出输入框让用户自定义
 3. 文件写入基础内容：front-matter（可选）、空行、`<!-- prompt-body -->` 占位符。
 4. 如用户勾选"自动生成标题"，则调用 `AIService.generateMeta` 获取标题/emoji，并在文件末尾插入 `## {emoji}{title}`。若 AI 不可用，则使用占位标题 `## 新 Prompt`。
 5. 打开 Markdown 文件到新编辑器标签页，并将光标定位到正文区域；同时在 JSON 存储中生成一条草稿 Prompt 记录，字段 `fromMarkdownFile` 指向该文件。
@@ -140,14 +140,14 @@ Prompt 对象作为 JSON 存储的基本单元。`fromMarkdownFile` 字段用于
 
 1. `GitSyncService` 初始化时调用 `ensureRepo()` 检测存储目录是否为 Git 仓库，检测失败则提示用户配置或手动初始化。
 2. 用户通过命令面板或状态栏按钮触发同步命令，先执行 `git status` 确认是否有未修改，冲突时提示用户先处理。
-3. 执行 `git pull` 并展示同步状态；如有冲突时在 `Prompt Hub Output Channel` 显示需要手动选择保留的 Prompt。
+3. 执行 `git pull` 并展示同步状态；如有冲突时在 `Otter Output Channel` 显示需要手动选择保留的 Prompt。
 4. 提交阶段，由用户输入 commit 信息（或使用模板），调用 `commit(message)` 和 `git push`；过程中展示进度。
 5. 命令执行期间支持取消，超时或出现异常时 `GitSyncService` 需自动回退到安全状态；单次操作限制时间 5 秒。
 6. 同步动作记录到独立 Git Channel 日志中，用户可随时查询同步历史。
 
 ### 4.7 首次使用引导（F11）
 
-1. **触发检测**：插件激活时检查 `context.globalState.get('promptHub.onboardingCompleted')`，未完成则延迟 1 秒启动向导。
+1. **触发检测**：插件激活时检查 `context.globalState.get('otter.onboardingCompleted')`，未完成则延迟 1 秒启动向导。
 2. **5 步流程**：
    - **步骤 1**：欢迎页面，提供"开始配置"、"使用默认设置"、"稍后提醒"三个选项
    - **步骤 2**：存储路径配置，提供预设场景（本地/云盘/项目级别），支持浏览选择
@@ -156,16 +156,16 @@ Prompt 对象作为 JSON 存储的基本单元。`fromMarkdownFile` 字段用于
    - **步骤 5**：完成页面，展示配置摘要 + 快速开始指南
 3. **UI 实现**：使用 `vscode.window.showQuickPick` + `vscode.window.showInputBox` 组合。
 4. **状态保存**：每步完成立即写入配置，避免中途退出丢失；向导取消时保留已配置部分。
-5. **命令接口**：提供 `promptHub.startOnboarding`、`promptHub.resetOnboarding`、`promptHub.configureStorage` 等命令。
+5. **命令接口**：提供 `otter.startOnboarding`、`otter.resetOnboarding`、`otter.configureStorage` 等命令。
 
 ### 4.8 快速打开设置（F12）
 
 1. **多入口访问**：
-   - 命令面板：`Prompt Hub: 打开设置`
+   - 命令面板：`Otter: 打开设置`
    - TreeView 工具栏：设置图标按钮
    - 状态栏：配置问题时显示警告图标
    - 右键菜单：TreeView 右键菜单
-2. **实现逻辑**：执行 `vscode.commands.executeCommand('workbench.action.openSettings', '@ext:publisher.prompt-hub')`
+2. **实现逻辑**：执行 `vscode.commands.executeCommand('workbench.action.openSettings', '@ext:publisher.otter')`
 3. **智能提示**：检测到配置问题（Git 未配置、AI API Key 缺失）时，状态栏显示可点击的警告提示。
 
 ---
@@ -188,13 +188,13 @@ Prompt 对象作为 JSON 存储的基本单元。`fromMarkdownFile` 字段用于
 
 参见 `requirements.md` 第 9 章完整配置清单，主要包括：
 
-- **存储路径**：`promptHub.storagePath`、`promptHub.storage.autoCreate`
-- **Markdown**：`promptHub.markdown.*`（镜像、文件名模板、自动导入等）
-- **Git 同步**：`promptHub.git.*`（enableSync、autoPullOnStartup、commitMessageTemplate 等）
-- **AI Provider**：`promptHub.ai.*`（provider、model、baseUrl、temperature、maxTokens 等）
-- **UI 交互**：`promptHub.ui.*`（showEmojiPicker、defaultView、sortBy 等）
-- **选区识别**：`promptHub.selection.*`（autoDetectPromptName、removePromptMarker）
-- **高级配置**：`promptHub.advanced.*`（enableUsageLog、logLevel、autoBackup 等）
+- **存储路径**：`otter.storagePath`、`otter.storage.autoCreate`
+- **Markdown**：`otter.markdown.*`（镜像、文件名模板、自动导入等）
+- **Git 同步**：`otter.git.*`（enableSync、autoPullOnStartup、commitMessageTemplate 等）
+- **AI Provider**：`otter.ai.*`（provider、model、baseUrl、temperature、maxTokens 等）
+- **UI 交互**：`otter.ui.*`（showEmojiPicker、defaultView、sortBy 等）
+- **选区识别**：`otter.selection.*`（autoDetectPromptName、removePromptMarker）
+- **高级配置**：`otter.advanced.*`（enableUsageLog、logLevel、autoBackup 等）
 
 ### 安全
 
@@ -210,8 +210,8 @@ Prompt 对象作为 JSON 存储的基本单元。`fromMarkdownFile` 字段用于
 
 ## 7. 日志与监控
 
-- **Output Channel - Prompt Hub**：记录关键操作、AI 请求摘要、错误堆栈。
-- **Output Channel - Prompt Hub Git Sync**：Git 同步日志、失败原因/堆栈、提交 SHA。
+- **Output Channel - Otter**：记录关键操作、AI 请求摘要、错误堆栈。
+- **Output Channel - Otter Git Sync**：Git 同步日志、失败原因/堆栈、提交 SHA。
 - **UsageLogService**：提供 query 参数支持按日期/模型过滤，便于手动报表。
 - **可选 Telemetry**：如需匿名统计，需提供显式开关并遵守 VSCode 市场政策。
 

@@ -14,47 +14,70 @@ import { GitSyncService } from '../services/GitSyncService';
 import { UsageLogService } from '../services/UsageLogService';
 
 /**
- * 命令注册器：负责注册所有 Prompt Hub 相关命令并实现具体逻辑
+ * 命令注册器：负责注册所有 Otter 相关命令并实现具体逻辑
  */
 export class CommandRegistrar {
+  private static isRecord(value: unknown): value is Record<string, unknown> {
+    return typeof value === 'object' && value !== null;
+  }
+
+  private static isPrompt(value: unknown): value is Prompt {
+    if (!CommandRegistrar.isRecord(value)) return false;
+    return (
+      typeof value.id === 'string' &&
+      typeof value.name === 'string' &&
+      typeof value.content === 'string'
+    );
+  }
+
+  private static extractPrompt(value: unknown): Prompt | undefined {
+    if (CommandRegistrar.isPrompt(value)) return value;
+    if (!CommandRegistrar.isRecord(value)) return undefined;
+    const maybePrompt = value.prompt;
+    if (CommandRegistrar.isPrompt(maybePrompt)) return maybePrompt;
+    return undefined;
+  }
+
   constructor(
     private readonly context: vscode.ExtensionContext,
     private readonly storageService: PromptStorageService,
     private readonly configService: ConfigurationService,
     private readonly treeProvider: PromptTreeProvider,
-    private readonly treeView?: vscode.TreeView<any>
+    private readonly treeView?: vscode.TreeView<vscode.TreeItem>
   ) {}
 
   /** 注册所有命令 */
   registerAll(): void {
-    this.register('promptHub.createFromSelection', () => this.createFromSelection());
-    this.register('promptHub.newPromptFile', () => this.newPromptFile());
-    this.register('promptHub.searchPrompt', () => this.searchPrompt());
-    this.register('promptHub.renamePromptFile', (context?: any) => this.renamePromptFile(context));
-    this.register('promptHub.copyPromptContent', (context?: any) =>
+    this.register('otter.createFromSelection', () => this.createFromSelection());
+    this.register('otter.newPromptFile', () => this.newPromptFile());
+    this.register('otter.searchPrompt', () => this.searchPrompt());
+    this.register('otter.renamePromptFile', (context?: unknown) => this.renamePromptFile(context));
+    this.register('otter.copyPromptContent', (context?: unknown) =>
       this.copyPromptContent(context)
     );
-    this.register('promptHub.editPrompt', (context?: any) => this.editPrompt(context));
-    this.register('promptHub.refreshView', () => this.refreshView());
-    this.register('promptHub.openSettings', () => this.openSettings());
-    this.register('promptHub.openStorageFolder', () => this.openStorageFolder());
-    this.register('promptHub.startOnboarding', () => this.startOnboarding());
-    this.register('promptHub.resetOnboarding', () => this.resetOnboarding());
-    this.register('promptHub.deletePrompt', (context?: any) => this.deletePrompt(context));
-    this.register('promptHub.gitPull', () => this.gitPull());
-    this.register('promptHub.gitSync', () => this.gitSync());
-    this.register('promptHub.showQuickPick', () => this.showQuickPick());
-    this.register('promptHub.onPromptItemClick', (prompt?: Prompt) => this.onPromptTreeItemClick(prompt));
-    this.register('promptHub.batchGenerateMeta', () => this.batchGenerateMeta());
-    this.register('promptHub.batchGenerateMetaSelected', () =>
+    this.register('otter.editPrompt', (context?: unknown) => this.editPrompt(context));
+    this.register('otter.refreshView', () => this.refreshView());
+    this.register('otter.openSettings', () => this.openSettings());
+    this.register('otter.openStorageFolder', () => this.openStorageFolder());
+    this.register('otter.startOnboarding', () => this.startOnboarding());
+    this.register('otter.resetOnboarding', () => this.resetOnboarding());
+    this.register('otter.deletePrompt', (context?: unknown) => this.deletePrompt(context));
+    this.register('otter.gitPull', () => this.gitPull());
+    this.register('otter.gitSync', () => this.gitSync());
+    this.register('otter.showQuickPick', () => this.showQuickPick());
+    this.register('otter.onPromptItemClick', (arg?: unknown) =>
+      this.onPromptTreeItemClick(CommandRegistrar.extractPrompt(arg))
+    );
+    this.register('otter.batchGenerateMeta', () => this.batchGenerateMeta());
+    this.register('otter.batchGenerateMetaSelected', () =>
       this.batchGenerateMetaSelected()
     );
-    this.register('promptHub.optimizeMeta', (context?: any) => this.optimizeMeta(context));
-    this.register('promptHub.batchOptimizeMeta', () => this.batchOptimizeMeta());
+    this.register('otter.optimizeMeta', (context?: unknown) => this.optimizeMeta(context));
+    this.register('otter.batchOptimizeMeta', () => this.batchOptimizeMeta());
   }
 
   /** 注册单个命令的工具方法 */
-  private register(command: string, callback: (...args: any[]) => any): void {
+  private register(command: string, callback: (...args: unknown[]) => unknown): void {
     const disposable = vscode.commands.registerCommand(command, callback);
     this.context.subscriptions.push(disposable);
   }
@@ -177,8 +200,8 @@ export class CommandRegistrar {
       ],
     });
 
-    const results = query ? fuse.search(query) : prompts.map((p) => ({ item: p } as any));
-    const items = results.slice(0, 50).map((r: any) => ({
+    const results = query ? fuse.search(query) : prompts.map((p) => ({ item: p }));
+    const items = results.slice(0, 50).map((r) => ({
       label: `${r.item.emoji || '📌'} ${r.item.name}`,
       description: r.item.content.substring(0, 80),
       prompt: r.item as Prompt,
@@ -193,16 +216,8 @@ export class CommandRegistrar {
   }
 
   /** 复制 Prompt 内容 */
-  private async copyPromptContent(context?: any): Promise<void> {
-    let prompt: Prompt | undefined;
-
-    if (context) {
-      if (context.id && context.name && context.content) {
-        prompt = context as Prompt;
-      } else if ((context as any).prompt) {
-        prompt = (context as any).prompt as Prompt;
-      }
-    }
+  private async copyPromptContent(context?: unknown): Promise<void> {
+    const prompt = CommandRegistrar.extractPrompt(context);
 
     if (!prompt) {
       void vscode.window.showErrorMessage('无法确定要复制的 Prompt。');
@@ -224,7 +239,7 @@ export class CommandRegistrar {
   }
 
   /** 编辑 Prompt：打开源 Markdown 文件 */
-  private async editPrompt(context?: any): Promise<void> {
+  private async editPrompt(context?: unknown): Promise<void> {
     const prompt = await this.ensurePromptSelected(context);
     if (!prompt) return;
 
@@ -242,7 +257,7 @@ export class CommandRegistrar {
    * - 不依赖时间戳规则：只要用户触发命令就直接重命名
    * - 用户不想重命名 → 不执行该命令即可
    */
-  private async renamePromptFile(context?: any): Promise<void> {
+  private async renamePromptFile(context?: unknown): Promise<void> {
     const prompt = await this.ensurePromptSelected(context);
     if (!prompt) return;
 
@@ -357,7 +372,7 @@ export class CommandRegistrar {
   }
 
   /** 删除 Prompt */
-  private async deletePrompt(context?: any): Promise<void> {
+  private async deletePrompt(context?: unknown): Promise<void> {
     const prompt = await this.ensurePromptSelected(context);
     if (!prompt) return;
 
@@ -471,7 +486,7 @@ export class CommandRegistrar {
     await vscode.window.withProgress(
       {
         location: vscode.ProgressLocation.Notification,
-        title: 'Prompt Hub: 正在执行 Git 同步...',
+        title: 'Otter: 正在执行 Git 同步...',
       },
       async () => {
         // 新设备常见场景：storagePath 不是仓库，但用户希望从远端拉取到本地
@@ -491,10 +506,10 @@ export class CommandRegistrar {
     await this.refreshAfterGit();
     if (importBackupDir) {
       void vscode.window.showWarningMessage(
-        `Prompt Hub: 导入过程中检测到文件冲突，已临时备份相关文件到：${importBackupDir}（导入后已尽量恢复；若同名冲突会自动改名保留，详情见日志）`
+        `Otter: 导入过程中检测到文件冲突，已临时备份相关文件到：${importBackupDir}（导入后已尽量恢复；若同名冲突会自动改名保留，详情见日志）`
       );
     }
-    void vscode.window.showInformationMessage('Prompt Hub: Git 同步完成。');
+    void vscode.window.showInformationMessage('Otter: Git 同步完成。');
   }
 
   /** Git 拉取/导入（新设备一键把远端 prompts 拉到本地） */
@@ -504,7 +519,7 @@ export class CommandRegistrar {
     let preserveUntrackedBackupDir: string | null = null;
     let preserveUntrackedConflicts = 0;
     const debugLogEnabled = this.configService.get<boolean>('git.debugLog', false);
-    const logDebug = (...args: any[]) => {
+    const logDebug = (...args: unknown[]) => {
       if (!debugLogEnabled) return;
       console.log('[CommandRegistrar][GitPull]', ...args);
     };
@@ -557,7 +572,7 @@ export class CommandRegistrar {
             },
           ],
           {
-            title: 'Prompt Hub: 选择 Git 拉取策略',
+            title: 'Otter: 选择 Git 拉取策略',
             placeHolder: '检测到本地有未提交改动，请选择要怎么处理',
             ignoreFocusOut: true,
           }
@@ -596,7 +611,7 @@ export class CommandRegistrar {
     await vscode.window.withProgress(
       {
         location: vscode.ProgressLocation.Notification,
-        title: 'Prompt Hub: 正在拉取/导入远端内容...',
+        title: 'Otter: 正在拉取/导入远端内容...',
       },
       async () => {
         if (!isRepo) {
@@ -629,17 +644,17 @@ export class CommandRegistrar {
     await this.refreshAfterGit();
     if (importBackupDir) {
       void vscode.window.showWarningMessage(
-        `Prompt Hub: 导入过程中检测到文件冲突，已临时备份相关文件到：${importBackupDir}（导入后已尽量恢复；若同名冲突会自动改名保留，详情见日志）`
+        `Otter: 导入过程中检测到文件冲突，已临时备份相关文件到：${importBackupDir}（导入后已尽量恢复；若同名冲突会自动改名保留，详情见日志）`
       );
     }
     if (preserveUntrackedBackupDir) {
       if (preserveUntrackedConflicts > 0) {
         void vscode.window.showWarningMessage(
-          `Prompt Hub: 已恢复远端内容并保留本地未跟踪文件，但有 ${preserveUntrackedConflicts} 个文件与远端同名，已自动改名保留。备份目录：${preserveUntrackedBackupDir}`
+          `Otter: 已恢复远端内容并保留本地未跟踪文件，但有 ${preserveUntrackedConflicts} 个文件与远端同名，已自动改名保留。备份目录：${preserveUntrackedBackupDir}`
         );
       } else {
         void vscode.window.showInformationMessage(
-          `Prompt Hub: 已恢复远端内容并保留本地未跟踪文件。备份目录：${preserveUntrackedBackupDir}`
+          `Otter: 已恢复远端内容并保留本地未跟踪文件。备份目录：${preserveUntrackedBackupDir}`
         );
       }
     }
@@ -648,25 +663,25 @@ export class CommandRegistrar {
     if (count <= 0) {
       const storagePath = this.configService.getStoragePath();
       const selected = await vscode.window.showWarningMessage(
-        `Prompt Hub: Git 拉取/导入完成，但未发现任何 Prompt（prompts.json/Markdown）。请确认仓库内容与 storagePath 是否正确：${storagePath}`,
+        `Otter: Git 拉取/导入完成，但未发现任何 Prompt（prompts.json/Markdown）。请确认仓库内容与 storagePath 是否正确：${storagePath}`,
         '打开存储目录',
         '打开设置',
         '开启 Git 诊断日志'
       );
 
       if (selected === '打开存储目录') {
-        await vscode.commands.executeCommand('promptHub.openStorageFolder');
+        await vscode.commands.executeCommand('otter.openStorageFolder');
       } else if (selected === '打开设置') {
         this.configService.openSettings();
       } else if (selected === '开启 Git 诊断日志') {
         await this.configService.set('git.debugLog', true, vscode.ConfigurationTarget.Global);
-        void vscode.window.showInformationMessage('Prompt Hub: 已开启 Git 诊断日志，可重新执行一次拉取/导入以收集更多信息。');
+        void vscode.window.showInformationMessage('Otter: 已开启 Git 诊断日志，可重新执行一次拉取/导入以收集更多信息。');
       }
 
       return;
     }
 
-    void vscode.window.showInformationMessage(`Prompt Hub: Git 拉取/导入完成（${count} 条 Prompt）。`);
+    void vscode.window.showInformationMessage(`Otter: Git 拉取/导入完成（${count} 条 Prompt）。`);
   }
 
   private async refreshAfterGit(): Promise<void> {
@@ -687,7 +702,7 @@ export class CommandRegistrar {
     const prompts = this.storageService.list();
 
     const normalizeSep = (p: string) => (p || '').replace(/\\/g, '/');
-    const isBackupPath = (p: string) => /(^|[\\/])\.prompt-hub-backup-\d{8}-\d{6}([\\/]|$)/.test(p);
+    const isBackupPath = (p: string) => /(^|[\\/])\.otter-backup-\d{8}-\d{6}([\\/]|$)/.test(p);
 
     const relPath = (abs: string | undefined) => {
       if (!abs) return '';
@@ -845,18 +860,18 @@ export class CommandRegistrar {
       },
       {
         label: '🎯 配置向导',
-        description: '重新运行 Prompt Hub 配置向导',
+        description: '重新运行 Otter 配置向导',
         action: 'onboarding',
       },
       {
         label: '⚙️ 打开设置',
-        description: '打开 Prompt Hub 设置页',
+        description: '打开 Otter 设置页',
         action: 'settings',
       },
     ];
 
     const picked = await vscode.window.showQuickPick(items, {
-      placeHolder: '选择要执行的 Prompt Hub 操作',
+      placeHolder: '选择要执行的 Otter 操作',
     });
     if (!picked) return;
 
@@ -891,8 +906,8 @@ export class CommandRegistrar {
   }
 
   /** 确保有一个 Prompt 被选中，没有传入时弹出列表让用户选择 */
-  private async ensurePromptSelected(input?: Prompt | { prompt?: Prompt }): Promise<Prompt | undefined> {
-    const prompt = (input as any)?.prompt ? (input as any).prompt as Prompt : (input as Prompt | undefined);
+  private async ensurePromptSelected(input?: unknown): Promise<Prompt | undefined> {
+    const prompt = CommandRegistrar.extractPrompt(input);
     if (prompt) return prompt;
 
     const list = this.storageService.list();
@@ -910,7 +925,7 @@ export class CommandRegistrar {
       { placeHolder: '请选择一个 Prompt' }
     );
 
-    return picked?.prompt;
+      return picked?.prompt;
   }
 
   private isInside(root: string, target: string): boolean {
@@ -927,20 +942,19 @@ export class CommandRegistrar {
     const base = path.basename(desiredPath, ext);
 
     let candidate = desiredPath;
-    let counter = 1;
-
-    while (true) {
+    for (let counter = 1; counter <= 1000; counter += 1) {
       try {
         await vscode.workspace.fs.stat(vscode.Uri.file(candidate));
         if (currentPath && path.resolve(candidate) === path.resolve(currentPath)) {
           return candidate;
         }
         candidate = path.join(dir, `${base}-${counter}${ext}`);
-        counter += 1;
       } catch {
         return candidate;
       }
     }
+
+    throw new Error(`无法生成不冲突的文件名（尝试次数过多）：${desiredPath}`);
   }
 
   /** 更新 Markdown 文件的标题行（# ...） */
@@ -1017,7 +1031,7 @@ export class CommandRegistrar {
   /** 简单的 CLI 调用 Demo：执行一条 echo 命令并展示结果 */
   // private async cliDemo(): Promise<void> {
   //   const command =
-  //     process.platform === 'win32' ? 'echo Prompt Hub CLI demo' : 'echo Prompt Hub CLI demo';
+  //     process.platform === 'win32' ? 'echo Otter CLI demo' : 'echo Otter CLI demo';
 
   //   try {
   //     const { stdout, stderr } = await this.exec(command);
@@ -1358,7 +1372,7 @@ export class CommandRegistrar {
    * 当用户在树视图中选择单个 Prompt 时，点击 ✨ 按钮触发
    * 直接执行优化，无需确认对话
    */
-  private async optimizeMeta(context?: any): Promise<void> {
+  private async optimizeMeta(context?: unknown): Promise<void> {
     try {
       const prompt = await this.ensurePromptSelected(context);
       if (!prompt) return;
@@ -1498,11 +1512,8 @@ export class CommandRegistrar {
       // 提取 Prompt 对象（从树视图项中获取）
       const selectedPrompts: Prompt[] = [];
       for (const item of selectedItems) {
-        // 检查是否是 PromptTreeItem（拥有 prompt 属性）
-        const promptItem = item as any;
-        if (promptItem.prompt) {
-          selectedPrompts.push(promptItem.prompt);
-        }
+        const prompt = CommandRegistrar.extractPrompt(item);
+        if (prompt) selectedPrompts.push(prompt);
       }
 
       if (!selectedPrompts.length) {

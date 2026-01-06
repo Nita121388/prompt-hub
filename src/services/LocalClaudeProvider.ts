@@ -7,6 +7,7 @@ import * as fs from 'fs';
 import { ConfigurationService } from './ConfigurationService';
 import type { BatchMetaRequestItem, BatchMetaResultItem, GeneratedMeta } from './AIService';
 import { extractJsonArray } from '../utils/JsonExtract';
+import { logger } from './Logger';
 
 const execAsync = promisify(exec);
 const fsPromises = fs.promises;
@@ -20,6 +21,37 @@ export class LocalClaudeProvider {
 
   constructor(private readonly config: ConfigurationService) {}
 
+  private createProcessError(
+    message: string,
+    details: {
+      code: number | null;
+      signal: NodeJS.Signals | string | null;
+      killed: boolean;
+      stdout: string;
+      stderr: string;
+    }
+  ): Error & {
+    code?: number | null;
+    signal?: NodeJS.Signals | string | null;
+    killed?: boolean;
+    stdout?: string;
+    stderr?: string;
+  } {
+    const err = new Error(message) as Error & {
+      code?: number | null;
+      signal?: NodeJS.Signals | string | null;
+      killed?: boolean;
+      stdout?: string;
+      stderr?: string;
+    };
+    err.code = details.code;
+    err.signal = details.signal;
+    err.killed = details.killed;
+    err.stdout = details.stdout;
+    err.stderr = details.stderr;
+    return err;
+  }
+
   private async runClaudeCli(
     claudePath: string,
     args: string[],
@@ -28,9 +60,9 @@ export class LocalClaudeProvider {
   ): Promise<{ stdout: string; stderr: string }> {
     const startedAt = Date.now();
     const commandForLog = this.formatCommand(claudePath, args);
-    console.log('[LocalClaudeProvider] runClaudeCli() spawn:', commandForLog);
-    console.log('[LocalClaudeProvider] runClaudeCli() stdio: [ignore, pipe, pipe]');
-    console.log('[LocalClaudeProvider] runClaudeCli() parent isTTY:', {
+    logger.debug('[LocalClaudeProvider] runClaudeCli() spawn', commandForLog);
+    logger.debug('[LocalClaudeProvider] runClaudeCli() stdio: [ignore, pipe, pipe]');
+    logger.debug('[LocalClaudeProvider] runClaudeCli() parent isTTY', {
       stdin: process.stdin.isTTY,
       stdout: process.stdout.isTTY,
       stderr: process.stderr.isTTY,
@@ -77,31 +109,37 @@ export class LocalClaudeProvider {
         clearTimeout(timer);
 
         const elapsed = Date.now() - startedAt;
-        console.log('[LocalClaudeProvider] runClaudeCli() exited:', { code, signal, elapsedMs: elapsed });
+        logger.debug('[LocalClaudeProvider] runClaudeCli() exited', { code, signal, elapsedMs: elapsed });
 
         if (maxBufferExceeded) {
-          const err: any = new Error(
-            `Claude CLI 输出过大（>${maxBufferBytes} bytes）已终止，请缩短 Prompt 或提高 maxBuffer 配置。`
+          reject(
+            this.createProcessError(
+              `Claude CLI 输出过大（>${maxBufferBytes} bytes）已终止，请缩短 Prompt 或提高 maxBuffer 配置。`,
+              {
+                code: code ?? null,
+                signal: signal ?? null,
+                killed: true,
+                stdout,
+                stderr,
+              }
+            )
           );
-          err.code = code;
-          err.signal = signal;
-          err.killed = true;
-          err.stdout = stdout;
-          err.stderr = stderr;
-          reject(err);
           return;
         }
 
         if (timedOut) {
-          const err: any = new Error(
-            `Claude CLI 执行超时（${timeoutMs}ms）被终止：可能是首次登录/授权需要交互、网络较慢或 Claude 进程卡住。补充：Claude 在检测到 stdin 为 pipe 时可能会等待 EOF（Node 默认会保持 stdin 打开）导致“假死”；本插件已使用 stdin=ignore 规避该问题。`
+          reject(
+            this.createProcessError(
+              `Claude CLI 执行超时（${timeoutMs}ms）被终止：可能是首次登录/授权需要交互、网络较慢或 Claude 进程卡住。补充：Claude 在检测到 stdin 为 pipe 时可能会等待 EOF（Node 默认会保持 stdin 打开）导致“假死”；本插件已使用 stdin=ignore 规避该问题。`,
+              {
+                code: code ?? null,
+                signal: signal ?? 'SIGTERM',
+                killed: true,
+                stdout,
+                stderr,
+              }
+            )
           );
-          err.code = code;
-          err.signal = signal ?? 'SIGTERM';
-          err.killed = true;
-          err.stdout = stdout;
-          err.stderr = stderr;
-          reject(err);
           return;
         }
 
@@ -110,13 +148,15 @@ export class LocalClaudeProvider {
           return;
         }
 
-        const err: any = new Error(`Command failed: ${commandForLog}`);
-        err.code = code;
-        err.signal = signal;
-        err.killed = false;
-        err.stdout = stdout;
-        err.stderr = stderr;
-        reject(err);
+        reject(
+          this.createProcessError(`Command failed: ${commandForLog}`, {
+            code: code ?? null,
+            signal: signal ?? null,
+            killed: false,
+            stdout,
+            stderr,
+          })
+        );
       });
     });
   }
@@ -154,7 +194,7 @@ export class LocalClaudeProvider {
       const claudePath = await this.getClaudePath();
       if (!claudePath) {
         throw new Error(
-          '未找到 Claude Code CLI，请在设置中配置 promptHub.local.claudePath，或设置环境变量 CLAUDE_BIN，或确保 PATH 中可直接执行 claude'
+          '未找到 Claude Code CLI，请在设置中配置 otter.local.claudePath，或设置环境变量 CLAUDE_BIN，或确保 PATH 中可直接执行 claude'
         );
       }
 
@@ -173,46 +213,56 @@ ${content.substring(0, 2000)}`;
       // 使用 -p/--print 避免进入交互模式，并跳过工作区信任对话框
       const args = ['-p', '--output-format', 'text', this.normalizePromptArg(prompt)];
       const command = this.formatCommand(claudePath, args);
-      console.log('[LocalClaudeProvider] 执行命令:', command.length > 500 ? `${command.slice(0, 500)}... (len=${command.length})` : command);
-      console.log('[LocalClaudeProvider] 超时设置:', timeoutMs, 'ms');
+      logger.debug('[LocalClaudeProvider] 执行命令长度', { chars: command.length });
+      logger.debug('[LocalClaudeProvider] 超时设置', { timeoutMs });
 
       const startedAt = Date.now();
       const { stdout, stderr } = await this.runClaudeCli(claudePath, args, timeoutMs);
-      console.log('[LocalClaudeProvider] 执行耗时:', Date.now() - startedAt, 'ms');
+      logger.debug('[LocalClaudeProvider] 执行耗时', { elapsedMs: Date.now() - startedAt });
 
       if (stderr) {
-        console.warn('[LocalClaudeProvider] stderr:', stderr);
+        logger.warn('[LocalClaudeProvider] stderr', stderr.slice(0, 500));
       }
 
-      console.log('[LocalClaudeProvider] stdout:', stdout);
+      logger.debug('[LocalClaudeProvider] stdout 长度', { bytes: stdout.length });
+      logger.debug('[LocalClaudeProvider] stdout 前500字', stdout.slice(0, 500));
 
       // 解析响应 - 查找 JSON（匹配最后一个，避免匹配到示例）
       const jsonMatches = stdout.match(/\{[^}]*"name"[^}]*"emoji"[^}]*\}/g);
       if (jsonMatches && jsonMatches.length > 0) {
         // 取最后一个匹配（通常是实际的生成结果，而不是示例）
         const lastMatch = jsonMatches[jsonMatches.length - 1];
-        console.log(`[LocalClaudeProvider] 找到 ${jsonMatches.length} 个 JSON，使用最后一个:`, lastMatch);
+        logger.debug('[LocalClaudeProvider] 找到 JSON', { count: jsonMatches.length });
         const parsed = JSON.parse(lastMatch);
         return { name: parsed.name, emoji: parsed.emoji };
       }
 
       throw new Error('无法从 Claude Code 响应中解析 JSON');
     } catch (error) {
-      const e: any = error;
+      const e = error as {
+        message?: string;
+        code?: unknown;
+        signal?: unknown;
+        killed?: unknown;
+        stdout?: unknown;
+        stderr?: unknown;
+      };
       const stderr = typeof e?.stderr === 'string' ? e.stderr : '';
       const stdout = typeof e?.stdout === 'string' ? e.stdout : '';
-      console.error('[LocalClaudeProvider] 生成元信息失败:', {
+      logger.error('[LocalClaudeProvider] 生成元信息失败', {
         message: e?.message || String(error),
         code: e?.code,
         signal: e?.signal,
         killed: e?.killed,
-        stdoutPreview: stdout ? stdout.slice(0, 800) : '',
-        stderrPreview: stderr ? stderr.slice(0, 800) : '',
+      });
+      logger.debug('[LocalClaudeProvider] 失败输出预览', {
+        stdoutPreview: stdout ? stdout.slice(0, 300) : '',
+        stderrPreview: stderr ? stderr.slice(0, 300) : '',
       });
 
       if (e?.killed && e?.signal === 'SIGTERM') {
         throw new Error(
-          `Claude CLI 执行超时（${timeoutMs}ms）被终止：可能是首次登录/授权需要交互，或网络较慢。建议先在终端手动运行 claude -p \"你好\" 完成登录；也可在设置中提高 promptHub.local.claudeTimeoutMs。`
+          `Claude CLI 执行超时（${timeoutMs}ms）被终止：可能是首次登录/授权需要交互，或网络较慢。建议先在终端手动运行 claude -p "你好" 完成登录；也可在设置中提高 otter.local.claudeTimeoutMs。`
         );
       }
 
@@ -231,7 +281,7 @@ ${content.substring(0, 2000)}`;
     const claudePath = await this.getClaudePath();
     if (!claudePath) {
       throw new Error(
-        '未找到 Claude Code CLI，请在设置中配置 promptHub.local.claudePath，或设置环境变量 CLAUDE_BIN，或确保 PATH 中可直接执行 claude'
+        '未找到 Claude Code CLI，请在设置中配置 otter.local.claudePath，或设置环境变量 CLAUDE_BIN，或确保 PATH 中可直接执行 claude'
       );
     }
 
@@ -295,10 +345,10 @@ ${content.substring(0, 2000)}`;
       const startedAt = Date.now();
       const { stdout, stderr } = await this.runClaudeCli(claudePath, args, timeoutMs);
       const elapsed = Date.now() - startedAt;
-      console.log(`${LOG_PREFIX} 执行完成, 耗时: ${elapsed}ms, items=${safeItems.length}`);
+      logger.debug(`${LOG_PREFIX} 执行完成`, { elapsedMs: elapsed, items: safeItems.length });
 
       if (stderr) {
-        console.warn(`${LOG_PREFIX} stderr:`, stderr.slice(0, 500));
+        logger.warn(`${LOG_PREFIX} stderr`, stderr.slice(0, 500));
       }
 
       const parsed = extractJsonArray<Record<string, unknown>>(stdout);
@@ -336,7 +386,7 @@ ${content.substring(0, 2000)}`;
 
       return results;
     } catch (error) {
-      console.error(`${LOG_PREFIX} 失败，将降级为逐个处理:`, error instanceof Error ? error.message : String(error));
+      logger.error(`${LOG_PREFIX} 失败，将降级为逐个处理`, error instanceof Error ? error.message : String(error));
 
       const results: BatchMetaResultItem[] = [];
       for (const req of safeItems) {
@@ -360,37 +410,46 @@ ${content.substring(0, 2000)}`;
       const claudePath = await this.getClaudePath();
       if (!claudePath) {
         throw new Error(
-          '未找到 Claude Code CLI，请在设置中配置 promptHub.local.claudePath，或设置环境变量 CLAUDE_BIN，或确保 PATH 中可直接执行 claude'
+          '未找到 Claude Code CLI，请在设置中配置 otter.local.claudePath，或设置环境变量 CLAUDE_BIN，或确保 PATH 中可直接执行 claude'
         );
       }
 
       const prompt = `请优化以下 Prompt 文本，使其更清晰简洁，保持中文 Markdown 格式。只返回优化后的文本，不要其他说明。\n\n${content}`;
 
       const args = ['-p', '--output-format', 'text', this.normalizePromptArg(prompt)];
-      console.log('[LocalClaudeProvider] 执行优化命令');
-      console.log('[LocalClaudeProvider] 超时设置:', timeoutMs, 'ms');
+      logger.debug('[LocalClaudeProvider] 执行优化命令');
+      logger.debug('[LocalClaudeProvider] 超时设置', { timeoutMs });
 
       const startedAt = Date.now();
       const { stdout } = await this.runClaudeCli(claudePath, args, timeoutMs);
-      console.log('[LocalClaudeProvider] 执行耗时:', Date.now() - startedAt, 'ms');
+      logger.debug('[LocalClaudeProvider] 执行耗时', { elapsedMs: Date.now() - startedAt });
 
       return stdout.trim() || content;
     } catch (error) {
-      const e: any = error;
+      const e = error as {
+        message?: string;
+        code?: unknown;
+        signal?: unknown;
+        killed?: unknown;
+        stdout?: unknown;
+        stderr?: unknown;
+      };
       const stderr = typeof e?.stderr === 'string' ? e.stderr : '';
       const stdout = typeof e?.stdout === 'string' ? e.stdout : '';
-      console.error('[LocalClaudeProvider] 优化失败:', {
+      logger.error('[LocalClaudeProvider] 优化失败', {
         message: e?.message || String(error),
         code: e?.code,
         signal: e?.signal,
         killed: e?.killed,
-        stdoutPreview: stdout ? stdout.slice(0, 800) : '',
-        stderrPreview: stderr ? stderr.slice(0, 800) : '',
+      });
+      logger.debug('[LocalClaudeProvider] 优化失败输出预览', {
+        stdoutPreview: stdout ? stdout.slice(0, 300) : '',
+        stderrPreview: stderr ? stderr.slice(0, 300) : '',
       });
 
       if (e?.killed && e?.signal === 'SIGTERM') {
         throw new Error(
-          `Claude CLI 执行超时（${timeoutMs}ms）被终止：可能是首次登录/授权需要交互，或网络较慢。建议先在终端手动运行 claude -p \"你好\" 完成登录；也可在设置中提高 promptHub.local.claudeTimeoutMs。`
+          `Claude CLI 执行超时（${timeoutMs}ms）被终止：可能是首次登录/授权需要交互，或网络较慢。建议先在终端手动运行 claude -p "你好" 完成登录；也可在设置中提高 otter.local.claudeTimeoutMs。`
         );
       }
 
@@ -410,19 +469,19 @@ ${content.substring(0, 2000)}`;
   private async getClaudePath(): Promise<string | null> {
     if (this.cachedClaudePath !== undefined) return this.cachedClaudePath;
 
-    console.log('[LocalClaudeProvider] getClaudePath() 开始检测 Claude CLI 路径');
+    logger.debug('[LocalClaudeProvider] getClaudePath() 开始检测 Claude CLI 路径');
     // 1. 从配置读取
     const configured = this.config.get<string>('local.claudePath');
     if (configured) {
       const resolved = this.resolvePath(configured);
       const ok = await this.fileExists(resolved);
-      console.log('[LocalClaudeProvider] 配置 local.claudePath:', configured, '=>', resolved, 'exists=', ok);
+      logger.debug('[LocalClaudeProvider] 配置 local.claudePath', { configured, resolved, exists: ok });
       if (ok) {
         this.cachedClaudePath = resolved;
         return resolved;
       }
     } else {
-      console.log('[LocalClaudeProvider] 配置 local.claudePath 为空，跳过配置路径检测');
+      logger.debug('[LocalClaudeProvider] 配置 local.claudePath 为空，跳过配置路径检测');
     }
 
     // 2. 从环境变量读取
@@ -430,19 +489,19 @@ ${content.substring(0, 2000)}`;
     if (envClaudeBin) {
       const resolved = this.resolvePath(envClaudeBin);
       const ok = await this.fileExists(resolved);
-      console.log('[LocalClaudeProvider] 环境变量 CLAUDE_BIN/CLAUDE_PATH:', envClaudeBin, '=>', resolved, 'exists=', ok);
+      logger.debug('[LocalClaudeProvider] 环境变量 CLAUDE_BIN/CLAUDE_PATH', { raw: envClaudeBin, resolved, exists: ok });
       if (ok) {
         this.cachedClaudePath = resolved;
         return resolved;
       }
     } else {
-      console.log('[LocalClaudeProvider] 环境变量 CLAUDE_BIN/CLAUDE_PATH 未设置，跳过');
+      logger.debug('[LocalClaudeProvider] 环境变量 CLAUDE_BIN/CLAUDE_PATH 未设置，跳过');
     }
 
     // 3. 从 VSCode 扩展目录检测（Claude Code 扩展通常内置 claude.exe）
     const fromExtensions = await this.detectClaudeFromVSCodeExtensions();
     if (fromExtensions) {
-      console.log('[LocalClaudeProvider] 从 VSCode 扩展目录检测到 Claude CLI:', fromExtensions);
+      logger.debug('[LocalClaudeProvider] 从 VSCode 扩展目录检测到 Claude CLI', fromExtensions);
       this.cachedClaudePath = fromExtensions;
       return fromExtensions;
     }
@@ -450,7 +509,7 @@ ${content.substring(0, 2000)}`;
     // 4. 自动检测：从 PATH 中找（Windows: where；macOS/Linux: which）
     const fromPath = await this.detectClaudeFromPath();
     if (fromPath) {
-      console.log('[LocalClaudeProvider] 从 PATH 检测到 Claude CLI:', fromPath);
+      logger.debug('[LocalClaudeProvider] 从 PATH 检测到 Claude CLI', fromPath);
       this.cachedClaudePath = fromPath;
       return fromPath;
     }
@@ -462,7 +521,7 @@ ${content.substring(0, 2000)}`;
       return detectedPath;
     }
 
-    console.warn('[LocalClaudeProvider] 未找到 Claude CLI：已尝试 配置/local.claudePath、环境变量 CLAUDE_BIN、PATH(where/which)、VSCode 扩展目录、常见目录');
+    logger.warn('[LocalClaudeProvider] 未找到 Claude CLI：已尝试 配置/local.claudePath、环境变量 CLAUDE_BIN、PATH(where/which)、VSCode 扩展目录、常见目录');
     this.cachedClaudePath = null;
     return null;
   }
@@ -497,7 +556,7 @@ ${content.substring(0, 2000)}`;
         .map((e) => path.join(extensionsRoot, e.name));
 
       if (!candidateDirs.length) {
-        console.log('[LocalClaudeProvider] VSCode 扩展目录未发现 anthropic.claude-code-*');
+        logger.debug('[LocalClaudeProvider] VSCode 扩展目录未发现 anthropic.claude-code-*');
         return null;
       }
 
@@ -508,7 +567,7 @@ ${content.substring(0, 2000)}`;
           : path.join(dir, 'resources', 'native-binary', 'claude');
 
         const ok = await this.fileExists(file);
-        console.log('[LocalClaudeProvider] 扩展内置 CLI 探测:', file, 'exists=', ok);
+        logger.debug('[LocalClaudeProvider] 扩展内置 CLI 探测', { file, exists: ok });
         if (!ok) continue;
 
         try {
@@ -524,7 +583,7 @@ ${content.substring(0, 2000)}`;
       candidates.sort((a, b) => b.mtimeMs - a.mtimeMs);
       return candidates[0].file;
     } catch (error) {
-      console.log('[LocalClaudeProvider] VSCode 扩展目录探测失败（可忽略）:', error instanceof Error ? error.message : String(error));
+      logger.debug('[LocalClaudeProvider] VSCode 扩展目录探测失败（可忽略）', error instanceof Error ? error.message : String(error));
       return null;
     }
   }
@@ -547,12 +606,12 @@ ${content.substring(0, 2000)}`;
       const first = (stdout || '').split(/\r?\n/).map((s) => s.trim()).find(Boolean);
       if (first) {
         const ok = await this.fileExists(first);
-        console.log('[LocalClaudeProvider] which claude =>', first, 'exists=', ok);
+        logger.debug('[LocalClaudeProvider] which claude', { path: first, exists: ok });
         if (ok) return first;
       }
       return null;
     } catch (error) {
-      console.log('[LocalClaudeProvider] PATH 检测失败（可忽略）:', error instanceof Error ? error.message : String(error));
+      logger.debug('[LocalClaudeProvider] PATH 检测失败（可忽略）', error instanceof Error ? error.message : String(error));
       return null;
     }
   }
@@ -570,7 +629,7 @@ ${content.substring(0, 2000)}`;
       for (const p of lines) {
         const resolved = this.resolvePath(p);
         const ok = await this.fileExists(resolved);
-        console.log('[LocalClaudeProvider] where', name, '=>', resolved, 'exists=', ok);
+        logger.debug('[LocalClaudeProvider] where 候选', { name, path: resolved, exists: ok });
         if (ok) return resolved;
       }
 
@@ -600,9 +659,9 @@ ${content.substring(0, 2000)}`;
 
     for (const p of possiblePaths) {
       const ok = await this.fileExists(p);
-      console.log('[LocalClaudeProvider] 常见路径探测:', p, 'exists=', ok);
+      logger.debug('[LocalClaudeProvider] 常见路径探测', { path: p, exists: ok });
       if (ok) {
-        console.log('[LocalClaudeProvider] 检测到 Claude:', p);
+        logger.debug('[LocalClaudeProvider] 检测到 Claude', p);
         return p;
       }
     }
@@ -650,7 +709,7 @@ ${content.substring(0, 2000)}`;
 
     for (const gitBashPath of possiblePaths) {
       const ok = await this.fileExists(gitBashPath);
-      console.log('[LocalClaudeProvider] 检测 Git Bash:', gitBashPath, 'exists=', ok);
+      logger.debug('[LocalClaudeProvider] 检测 Git Bash', { path: gitBashPath, exists: ok });
       if (ok) {
         return gitBashPath;
       }
@@ -661,7 +720,7 @@ ${content.substring(0, 2000)}`;
       const { stdout } = await execAsync('where bash.exe', { timeout: 5000 });
       const first = (stdout || '').split(/\r?\n/).map((s) => s.trim()).find(Boolean);
       if (first && await this.fileExists(first)) {
-        console.log('[LocalClaudeProvider] 从 PATH 检测到 Git Bash:', first);
+        logger.debug('[LocalClaudeProvider] 从 PATH 检测到 Git Bash', first);
         return first;
       }
     } catch {
@@ -675,7 +734,7 @@ ${content.substring(0, 2000)}`;
    * 处理 Git Bash 缺失的情况（引导用户安装或配置）
    */
   private async handleGitBashMissing(): Promise<void> {
-    console.log('[LocalClaudeProvider] 处理 Git Bash 缺失问题');
+    logger.debug('[LocalClaudeProvider] 处理 Git Bash 缺失问题');
 
     // 尝试自动检测
     const detectedPath = await this.detectGitBash();

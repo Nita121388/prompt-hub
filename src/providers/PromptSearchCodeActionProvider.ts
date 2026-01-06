@@ -1,7 +1,7 @@
 import * as vscode from 'vscode';
 
 /**
- * 让选区可通过“灯泡”快速触发 Prompt Hub 搜索的 CodeActionProvider
+ * 让选区可通过“灯泡”快速触发 Otter 搜索的 CodeActionProvider
  */
 export class PromptSearchCodeActionProvider implements vscode.CodeActionProvider {
   /**
@@ -15,6 +15,10 @@ export class PromptSearchCodeActionProvider implements vscode.CodeActionProvider
     _context: vscode.CodeActionContext,
     _token: vscode.CancellationToken
   ): vscode.CodeAction[] | undefined {
+    void _document;
+    void _context;
+    void _token;
+
     // 仅在有选区时提供灯泡操作
     if (range.isEmpty) return;
 
@@ -22,7 +26,7 @@ export class PromptSearchCodeActionProvider implements vscode.CodeActionProvider
     const action = new vscode.CodeAction(title, vscode.CodeActionKind.QuickFix);
     action.command = {
       title,
-      command: 'promptHub.searchPrompt',
+      command: 'otter.searchPrompt',
     };
 
     return [action];

@@ -5,7 +5,7 @@ import { glob } from 'glob';
 export async function run(): Promise<void> {
   // 创建 Mocha 测试实例
   const mocha = new Mocha({
-    ui: 'bdd',
+    ui: 'tdd',
     color: true,
     timeout: 10000, // 10秒超时
   });

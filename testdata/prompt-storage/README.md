@@ -1,4 +1,4 @@
-# Prompt Hub 测试数据（用于手工测试 Prompt）
+# Otter 测试数据（用于手工测试 Prompt）
 
 这个目录提供一套可复用的测试 Prompt（`prompts.json` + 对应的 Markdown 源文件），用于快速验证：
 
@@ -9,14 +9,14 @@
 
 ## 使用方法（推荐）
 
-1. 在 VSCode 设置里将 `promptHub.storagePath` 指向本目录：
+1. 在 VSCode 设置里将 `otter.storagePath` 指向本目录：
 
-   - Windows 示例：`f:\\File\\Projects\\prompt-hub\\upstream\\testdata\\prompt-storage`
+   - Windows 示例：`f:\\File\\Projects\\otter\\upstream\\testdata\\prompt-storage`
    - 或使用工作区路径：`${workspaceFolder}/upstream/testdata/prompt-storage`
 
 2. 重载窗口（`Developer: Reload Window`）。
 
-3. 打开侧边栏 `Prompt Hub`，应能看到 3 条测试 Prompt。
+3. 打开侧边栏 `Otter`，应能看到 3 条测试 Prompt。
 
 ## 数据说明
 

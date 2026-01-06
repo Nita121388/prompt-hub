@@ -40,6 +40,11 @@
 - 冲突策略与提示（镜像）
 - 单元测试与集成测试
 
+### 修复
+- 修复新建 Prompt 后侧边栏不显示：默认启用 `otter.markdown.enableMirror`，并确保新建 Markdown 写入 Otter ID 标记（兼容旧版 PromptHub ID）
+- 文件名与标题/emoji 关联：对默认时间戳命名的文件进行自动重命名（用户自定义文件名默认不覆盖）
+- 相关排障与修复脚本说明见：[Markdown 镜像常见问题排查](docs/troubleshooting/markdown-mirror.md)
+
 ## [0.1.0] - 待发布
 
 ### 新增

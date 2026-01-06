@@ -22,6 +22,11 @@ export interface BatchMetaResultItem {
 
 export type AIProvider = 'openai' | 'azure' | 'gemini' | 'deepseek' | 'qwen' | 'custom' | 'local-claude' | 'local-codex';
 
+type ChatMessage = {
+  role: 'system' | 'user' | 'assistant';
+  content: string;
+};
+
 /**
  * AI 服务：封装元信息生成与内容优化
  * 支持多个提供商：OpenAI、Azure、Gemini、DeepSeek、Qwen、自定义、本地 Claude Code、本地 Codex
@@ -44,7 +49,7 @@ export class AIService {
       if (stored) return stored;
     }
 
-    // 2) 再读“通用 key”（旧格式，配置向导历史版本写入 promptHub.ai.apiKey）
+    // 2) 再读“通用 key”（旧格式，配置向导历史版本写入 otter.ai.apiKey）
     const legacy = await this.config.getSecret('ai.apiKey');
     if (legacy) {
       // 迁移：补写一份到新格式，避免后续每次都走降级
@@ -72,7 +77,12 @@ export class AIService {
   /**
    * 构建 API 请求体（支持不同的提供商格式）
    */
-  private buildRequestBody(provider: AIProvider, model: string, temperature: number, messages: any[]): any {
+  private buildRequestBody(
+    provider: AIProvider,
+    model: string,
+    temperature: number,
+    messages: ChatMessage[]
+  ): Record<string, unknown> {
     switch (provider) {
       case 'gemini':
         // Google Gemini API 格式
@@ -114,7 +124,7 @@ export class AIService {
     const normalizedBaseUrl = (baseUrl || '').trim().replace(/\/+$/, '');
 
     switch (provider) {
-      case 'gemini':
+      case 'gemini': {
         // Gemini: 允许用户传入完整 endpoint（包含 :generateContent）或仅传 models base
         // 规范格式：https://.../v1beta/models/{model}:generateContent
         if (normalizedBaseUrl && normalizedBaseUrl.includes(':generateContent')) {
@@ -136,6 +146,7 @@ export class AIService {
 
         // 没有 model 时保持兼容（可能会失败，但至少 URL 结构可读）
         return `${geminiBase}:generateContent`;
+      }
       case 'deepseek':
         // DeepSeek（OpenAI 兼容）：默认 /chat/completions
         if (normalizedBaseUrl) {
@@ -161,14 +172,40 @@ export class AIService {
   /**
    * 解析 API 响应（处理不同提供商的响应格式）
    */
-  private parseResponse(provider: AIProvider, data: any): string {
+  private parseResponse(provider: AIProvider, data: unknown): string {
     switch (provider) {
       case 'gemini':
         // Gemini 响应格式
-        return data.candidates?.[0]?.content?.parts?.[0]?.text?.trim() || '';
+        if (!data || typeof data !== 'object') return '';
+        {
+          const root = data as Record<string, unknown>;
+          const candidates = root['candidates'];
+          if (!Array.isArray(candidates) || candidates.length <= 0) return '';
+          const candidate0 = candidates[0] as unknown;
+          if (!candidate0 || typeof candidate0 !== 'object') return '';
+          const content = (candidate0 as Record<string, unknown>)['content'];
+          if (!content || typeof content !== 'object') return '';
+          const parts = (content as Record<string, unknown>)['parts'];
+          if (!Array.isArray(parts) || parts.length <= 0) return '';
+          const part0 = parts[0] as unknown;
+          if (!part0 || typeof part0 !== 'object') return '';
+          const text = (part0 as Record<string, unknown>)['text'];
+          return typeof text === 'string' ? text.trim() : '';
+        }
       default:
         // OpenAI 兼容格式
-        return data.choices?.[0]?.message?.content?.trim() || '';
+        if (!data || typeof data !== 'object') return '';
+        {
+          const root = data as Record<string, unknown>;
+          const choices = root['choices'];
+          if (!Array.isArray(choices) || choices.length <= 0) return '';
+          const choice0 = choices[0] as unknown;
+          if (!choice0 || typeof choice0 !== 'object') return '';
+          const message = (choice0 as Record<string, unknown>)['message'];
+          if (!message || typeof message !== 'object') return '';
+          const content = (message as Record<string, unknown>)['content'];
+          return typeof content === 'string' ? content.trim() : '';
+        }
     }
   }
 
@@ -201,7 +238,7 @@ export class AIService {
   async generateMeta(content: string): Promise<GeneratedMeta> {
     const providerRaw = this.config.get<string>('ai.provider', '').trim();
     if (!providerRaw) {
-      void vscode.window.showWarningMessage('尚未配置 AI 提供商，请先运行「Prompt Hub: 配置向导」或在设置中配置 promptHub.ai.provider。');
+      void vscode.window.showWarningMessage('尚未配置 AI 提供商，请先运行「Otter: 配置向导」或在设置中配置 otter.ai.provider。');
       return {};
     }
 
@@ -263,7 +300,7 @@ export class AIService {
 
       if (!res.ok) throw new Error(`HTTP ${res.status}: ${res.statusText}`);
 
-      const data: any = await res.json();
+      const data: unknown = await res.json();
       const text = this.parseResponse(provider, data);
 
       try {
@@ -283,7 +320,7 @@ export class AIService {
   async generateMetaBatch(items: BatchMetaRequestItem[]): Promise<BatchMetaResultItem[]> {
     const providerRaw = this.config.get<string>('ai.provider', '').trim();
     if (!providerRaw) {
-      void vscode.window.showWarningMessage('尚未配置 AI 提供商，请先运行「Prompt Hub: 配置向导」或在设置中配置 promptHub.ai.provider。');
+      void vscode.window.showWarningMessage('尚未配置 AI 提供商，请先运行「Otter: 配置向导」或在设置中配置 otter.ai.provider。');
       return items.map((i) => ({ id: i.id, error: '未配置 AI 提供商' }));
     }
 
@@ -335,7 +372,7 @@ export class AIService {
   async optimize(content: string): Promise<string> {
     const providerRaw = this.config.get<string>('ai.provider', '').trim();
     if (!providerRaw) {
-      void vscode.window.showWarningMessage('尚未配置 AI 提供商，请先运行「Prompt Hub: 配置向导」或在设置中配置 promptHub.ai.provider。');
+      void vscode.window.showWarningMessage('尚未配置 AI 提供商，请先运行「Otter: 配置向导」或在设置中配置 otter.ai.provider。');
       return content;
     }
 
@@ -397,7 +434,7 @@ export class AIService {
 
       if (!res.ok) throw new Error(`HTTP ${res.status}: ${res.statusText}`);
 
-      const data: any = await res.json();
+      const data: unknown = await res.json();
       const text = this.parseResponse(provider, data);
 
       return text || content;

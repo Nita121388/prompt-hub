@@ -45,6 +45,7 @@ export class MarkdownMirrorService {
    * 不需要再反向导出
    */
   bindOnStorageChange(context: vscode.ExtensionContext): void {
+    void context;
     // 暂时禁用自动导出，避免循环触发和覆盖用户编辑
     // const disposable = this.storage.onDidChangePrompts(async () => {
     //   try {
@@ -100,6 +101,7 @@ export class MarkdownMirrorService {
     console.log('[MarkdownMirrorService] 解析结果 - name:', parsed.name, ', emoji:', parsed.emoji);
 
     const filePath = doc.uri.fsPath;
+    const fileKey = this.normalizePathForCompare(filePath);
     const fallbackName = path.basename(filePath, path.extname(filePath));
     let name = parsed.name?.trim() || fallbackName;
 
@@ -124,7 +126,9 @@ export class MarkdownMirrorService {
 
     let existing = idInFile ? this.storage.getById(idInFile) : undefined;
     if (!existing) {
-      existing = all.find((p) => p.sourceFile === filePath);
+      existing = all.find(
+        (p) => p.sourceFile && this.normalizePathForCompare(p.sourceFile) === fileKey
+      );
     }
     console.log('[MarkdownMirrorService] 查找已存在的Prompt:', existing ? `找到 (id: ${existing.id})` : '未找到');
 
@@ -253,7 +257,7 @@ export class MarkdownMirrorService {
   }
 
   private extractIdMarker(text: string): string | undefined {
-    const m = text.match(/<!--\s*PromptHub:id=([\w-]+)\s*-->/i);
+    const m = text.match(/<!--\s*(?:PromptHub|Otter):id=([\w-]+)\s*-->/i);
     return m?.[1];
   }
 
@@ -263,8 +267,7 @@ export class MarkdownMirrorService {
 
   private async addWithUniqueName(base: Prompt): Promise<Prompt> {
     let candidate = base.name;
-    let i = 1;
-    while (true) {
+    for (let i = 1; i <= 50; i += 1) {
       try {
         const created = { ...base, name: candidate };
         await this.storage.add(created);
@@ -272,10 +275,11 @@ export class MarkdownMirrorService {
       } catch (e) {
         // 若名称冲突，换下一个名称（保持 id 不变，避免后续与文件内 id 再次不一致）
         candidate = `${base.name}-${i}`;
-        i += 1;
-        if (i > 50) throw e; // 保护性退出
+        if (i >= 50) throw e; // 保护性退出
       }
     }
+
+    throw new Error(`无法生成不冲突的名称（尝试次数过多）：${base.name}`);
   }
 
   private async renameFileByTitleIfNeeded(
@@ -300,12 +304,10 @@ export class MarkdownMirrorService {
     }
 
     // 确保新文件名不冲突
-    let counter = 1;
-    while (true) {
+    for (let counter = 1; counter <= 1000; counter += 1) {
       try {
         await fs.access(newPath);
         newPath = path.join(dir, `${emojiPart}${sanitizedName}-${counter}.md`);
-        counter += 1;
       } catch {
         break;
       }
@@ -343,6 +345,11 @@ export class MarkdownMirrorService {
   private isInside(root: string, target: string): boolean {
     const rel = path.relative(path.resolve(root), path.resolve(target));
     return !!rel && !rel.startsWith('..') && !path.isAbsolute(rel);
+  }
+
+  private normalizePathForCompare(p: string): string {
+    const resolved = path.resolve(p);
+    return process.platform === 'win32' ? resolved.toLowerCase() : resolved;
   }
 
 }

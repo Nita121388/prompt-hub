@@ -6,6 +6,8 @@ import { Prompt, PromptStorage } from '../types/Prompt';
 import { ConfigurationService } from './ConfigurationService';
 import { MarkdownPromptParser } from '../utils/MarkdownPromptParser';
 import { generateId } from '../utils/helpers';
+import { logger } from './Logger';
+import { enqueueByKey } from '../utils/WriteQueue';
 
 /**
  * Prompt 存储服务
@@ -72,7 +74,7 @@ export class PromptStorageService {
     } catch {
       if (autoCreate) {
         await fs.mkdir(this.storagePath, { recursive: true });
-        console.log(`已创建存储目录: ${this.storagePath}`);
+        logger.info('已创建存储目录', { storagePath: this.storagePath });
       } else {
         throw new Error(`存储目录不存在: ${this.storagePath}`);
       }
@@ -94,12 +96,13 @@ export class PromptStorageService {
         console.log(`检测到数据版本不一致，执行迁移...`);
         // await this.migrate(storage);
       }
-    } catch (error: any) {
-      if (error.code === 'ENOENT') {
+    } catch (error: unknown) {
+      const err = error as NodeJS.ErrnoException;
+      if (err?.code === 'ENOENT') {
         // 文件不存在，初始化为空
         this.prompts = [];
         await this.save();
-        console.log('初始化空的 Prompt 存储文件');
+        logger.info('初始化空的 Prompt 存储文件');
       } else {
         throw error;
       }
@@ -110,39 +113,39 @@ export class PromptStorageService {
    * 保存 Prompt 数据
    */
   private async save(): Promise<void> {
-    console.log('[PromptStorageService] 开始保存数据，Prompt总数:', this.prompts.length);
+    await enqueueByKey(this.storageFile, async () => {
+      const storage: PromptStorage = {
+        version: this.STORAGE_VERSION,
+        prompts: this.prompts,
+        usageLogs: [], // TODO: 集成 AI 使用日志
+      };
 
-    const storage: PromptStorage = {
-      version: this.STORAGE_VERSION,
-      prompts: this.prompts,
-      usageLogs: [], // TODO: 集成 AI 使用日志
-    };
+      const json = JSON.stringify(storage, null, 2);
 
-    const json = JSON.stringify(storage, null, 2);
-    console.log('[PromptStorageService] JSON长度:', json.length, '字符');
+      // 使用临时文件 + 原子重命名策略
+      const tempFile = `${this.storageFile}.tmp`;
 
-    // 使用临时文件 + 原子重命名策略
-    const tempFile = `${this.storageFile}.tmp`;
-    console.log('[PromptStorageService] 存储文件路径:', this.storageFile);
-
-    try {
-      await fs.writeFile(tempFile, json, 'utf-8');
-      console.log('[PromptStorageService] 临时文件写入成功');
-      await fs.rename(tempFile, this.storageFile);
-      console.log('[PromptStorageService] 文件重命名成功');
-    } catch (error) {
-      console.error('[PromptStorageService] 保存失败:', error);
-      // 清理临时文件
       try {
-        await fs.unlink(tempFile);
-      } catch {}
-      throw error;
-    }
+        await fs.writeFile(tempFile, json, 'utf-8');
+        await fs.rename(tempFile, this.storageFile);
+      } catch (error) {
+        logger.error('[PromptStorageService] 保存失败', error);
+        // 清理临时文件
+        try {
+          await fs.unlink(tempFile);
+        } catch {
+          // 忽略清理失败
+        }
+        throw error;
+      }
 
-    // 触发变更事件
-    console.log('[PromptStorageService] 触发变更事件 _onDidChangePrompts.fire()');
-    this._onDidChangePrompts.fire();
-    console.log('[PromptStorageService] 变更事件已触发');
+      // 触发变更事件
+      this._onDidChangePrompts.fire();
+      logger.debug('[PromptStorageService] 已保存并触发变更事件', {
+        promptCount: this.prompts.length,
+        storageFile: this.storageFile,
+      });
+    });
   }
 
   /**
@@ -265,7 +268,8 @@ export class PromptStorageService {
         await fs.unlink(removed.sourceFile);
         console.log('[PromptStorageService] Markdown文件已删除');
       } catch (err) {
-        const code = (err as any)?.code as string | undefined;
+        const errorCode = (err as NodeJS.ErrnoException | undefined)?.code;
+        const code = typeof errorCode === 'string' ? errorCode : undefined;
         console.error('[PromptStorageService] 删除Markdown文件失败:', err);
 
         // 兜底：如果文件路径已被外部工具（如 Obsidian）重命名导致找不到，则按 id 扫描存储目录定位真实文件并删除
@@ -477,7 +481,7 @@ export class PromptStorageService {
   private async collectMarkdownFiles(root: string): Promise<string[]> {
     const result: string[] = [];
     const ignoreDirs = new Set(['.git', 'node_modules', '.vscode', '.obsidian']);
-    const ignoreDirPrefixes = ['.prompt-hub-backup-'];
+    const ignoreDirPrefixes = ['.otter-backup-'];
 
     const walk = async (dir: string) => {
       let entries: Dirent[];
@@ -567,7 +571,7 @@ export class PromptStorageService {
     const kept: Prompt[] = [];
     let removed = 0;
 
-    const isBackupPath = (filePath: string) => /(^|[\\/])\.prompt-hub-backup-/.test(filePath);
+    const isBackupPath = (filePath: string) => /(^|[\\/])\.otter-backup-/.test(filePath);
 
     for (const p of this.prompts) {
       if (!p.sourceFile) {

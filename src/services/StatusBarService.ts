@@ -3,7 +3,7 @@ import { ConfigurationService } from './ConfigurationService';
 
 /**
  * 状态栏服务
- * 提供快速访问 Prompt Hub 功能的状态栏图标
+ * 提供快速访问 Otter 功能的状态栏图标
  */
 export class StatusBarService {
   private statusBarItem: vscode.StatusBarItem;
@@ -20,8 +20,8 @@ export class StatusBarService {
 
     // 设置图标和提示文字
     this.statusBarItem.text = '📋';
-    this.statusBarItem.tooltip = 'Prompt Hub - 快速访问';
-    this.statusBarItem.command = 'promptHub.showQuickPick';
+    this.statusBarItem.tooltip = 'Otter - 快速访问';
+    this.statusBarItem.command = 'otter.showQuickPick';
 
     // 注册到上下文
     this.context.subscriptions.push(this.statusBarItem);
@@ -32,7 +32,10 @@ export class StatusBarService {
     // 监听配置变化
     this.context.subscriptions.push(
       vscode.workspace.onDidChangeConfiguration((e) => {
-        if (e.affectsConfiguration('promptHub.statusBar.enable')) {
+        if (
+          e.affectsConfiguration('otter.statusBar.enable') ||
+          e.affectsConfiguration('promptHub.statusBar.enable')
+        ) {
           this.updateVisibility();
         }
       })

@@ -6,6 +6,7 @@ import * as fs from 'fs';
 import { ConfigurationService } from './ConfigurationService';
 import type { BatchMetaRequestItem, BatchMetaResultItem, GeneratedMeta } from './AIService';
 import { extractJsonArray } from '../utils/JsonExtract';
+import { logger } from './Logger';
 
 const execAsync = promisify(exec);
 const fsPromises = fs.promises;
@@ -19,6 +20,37 @@ export class LocalCodexProvider {
   private cachedInvocation: { bin: string; argsPrefix: string[]; displayName: string } | null | undefined;
 
   constructor(private readonly config: ConfigurationService) {}
+
+  private createProcessError(
+    message: string,
+    details: {
+      code: number | null;
+      signal: NodeJS.Signals | string | null;
+      killed: boolean;
+      stdout: string;
+      stderr: string;
+    }
+  ): Error & {
+    code?: number | null;
+    signal?: NodeJS.Signals | string | null;
+    killed?: boolean;
+    stdout?: string;
+    stderr?: string;
+  } {
+    const err = new Error(message) as Error & {
+      code?: number | null;
+      signal?: NodeJS.Signals | string | null;
+      killed?: boolean;
+      stdout?: string;
+      stderr?: string;
+    };
+    err.code = details.code;
+    err.signal = details.signal;
+    err.killed = details.killed;
+    err.stdout = details.stdout;
+    err.stderr = details.stderr;
+    return err;
+  }
 
   private formatArgsForLog(args: string[]): string {
     return args
@@ -38,8 +70,8 @@ export class LocalCodexProvider {
     maxBufferBytes = 2 * 1024 * 1024
   ): Promise<{ stdout: string; stderr: string }> {
     const fullArgs = [...invocation.argsPrefix, ...args];
-    console.log('[LocalCodexProvider] runCodexCli() spawn:', invocation.displayName, this.formatArgsForLog(fullArgs));
-    console.log('[LocalCodexProvider] runCodexCli() stdio: [ignore, pipe, pipe]');
+    logger.debug('[LocalCodexProvider] runCodexCli() spawn', invocation.displayName, this.formatArgsForLog(fullArgs));
+    logger.debug('[LocalCodexProvider] runCodexCli() stdio: [ignore, pipe, pipe]');
 
     const startedAt = Date.now();
     return await new Promise((resolve, reject) => {
@@ -82,29 +114,34 @@ export class LocalCodexProvider {
       child.on('close', (code, signal) => {
         clearTimeout(timer);
         const elapsed = Date.now() - startedAt;
-        console.log('[LocalCodexProvider] runCodexCli() exited:', { code, signal, elapsedMs: elapsed });
+        logger.debug('[LocalCodexProvider] runCodexCli() exited', { code, signal, elapsedMs: elapsed });
 
         if (maxBufferExceeded) {
-          const err: any = new Error(
-            `Codex CLI 输出过大（>${maxBufferBytes} bytes）已终止，请缩短 Prompt 或提高 maxBuffer 配置。`
+          reject(
+            this.createProcessError(
+              `Codex CLI 输出过大（>${maxBufferBytes} bytes）已终止，请缩短 Prompt 或提高 maxBuffer 配置。`,
+              {
+                code: code ?? null,
+                signal: signal ?? null,
+                killed: true,
+                stdout,
+                stderr,
+              }
+            )
           );
-          err.code = code;
-          err.signal = signal;
-          err.killed = true;
-          err.stdout = stdout;
-          err.stderr = stderr;
-          reject(err);
           return;
         }
 
         if (timedOut) {
-          const err: any = new Error(`Codex CLI 执行超时（${timeoutMs}ms）被终止。`);
-          err.code = code;
-          err.signal = signal ?? 'SIGTERM';
-          err.killed = true;
-          err.stdout = stdout;
-          err.stderr = stderr;
-          reject(err);
+          reject(
+            this.createProcessError(`Codex CLI 执行超时（${timeoutMs}ms）被终止。`, {
+              code: code ?? null,
+              signal: signal ?? 'SIGTERM',
+              killed: true,
+              stdout,
+              stderr,
+            })
+          );
           return;
         }
 
@@ -113,13 +150,15 @@ export class LocalCodexProvider {
           return;
         }
 
-        const err: any = new Error(`Codex CLI 退出码非 0：${code ?? 'null'}`);
-        err.code = code;
-        err.signal = signal;
-        err.killed = false;
-        err.stdout = stdout;
-        err.stderr = stderr;
-        reject(err);
+        reject(
+          this.createProcessError(`Codex CLI 退出码非 0：${code ?? 'null'}`, {
+            code: code ?? null,
+            signal: signal ?? null,
+            killed: false,
+            stdout,
+            stderr,
+          })
+        );
       });
     });
   }
@@ -147,7 +186,7 @@ export class LocalCodexProvider {
 
       // npm 的 cmd shim 通常会包含一个被引号包裹的 *.js 路径，例如：
       // "%dp0%\\node_modules\\@openai\\codex\\bin\\codex.js"
-      const jsMatches = [...shimText.matchAll(/\"([^\"]+?\.js)\"/gi)]
+      const jsMatches = [...shimText.matchAll(/"([^"]+?\.js)"/gi)]
         .map((m) => m[1])
         .filter(Boolean);
       const lastJs = jsMatches.length ? jsMatches[jsMatches.length - 1] : null;
@@ -172,7 +211,7 @@ export class LocalCodexProvider {
       const nodeExe = bundledOk ? bundledNode : (await this.getNodeExePath()) || null;
       if (!nodeExe) return null;
 
-      console.log('[LocalCodexProvider] 检测到 codex.cmd，将绕过批处理 shim 以避免中文参数乱码');
+      logger.debug('[LocalCodexProvider] 检测到 codex.cmd，将绕过批处理 shim 以避免中文参数乱码');
       return {
         bin: nodeExe,
         argsPrefix: [scriptPath],
@@ -199,7 +238,7 @@ export class LocalCodexProvider {
         this.cachedInvocation = resolved;
         return resolved;
       }
-      console.warn('[LocalCodexProvider] codexPath 指向 .cmd/.bat，可能导致中文参数乱码；建议改用本地 Claude Provider 或配置可执行版本的 Codex');
+      logger.warn('[LocalCodexProvider] codexPath 指向 .cmd/.bat，可能导致中文参数乱码；建议改用本地 Claude Provider 或配置可执行版本的 Codex');
     }
 
     this.cachedInvocation = { bin: codexPath, argsPrefix: [], displayName: codexPath };
@@ -211,23 +250,24 @@ export class LocalCodexProvider {
    */
   async generateMeta(content: string): Promise<GeneratedMeta> {
     const LOG_PREFIX = '[LocalCodexProvider] generateMeta';
+    const timeoutMs = this.config.get<number>('local.codexTimeoutMs', 10000);
     try {
-      console.log(`${LOG_PREFIX} 开始执行`);
+      logger.debug(`${LOG_PREFIX} 开始执行`);
       const contentLen = content.length;
-      console.log(`${LOG_PREFIX} 输入内容长度: ${contentLen} 字节`);
+      logger.debug(`${LOG_PREFIX} 输入内容长度`, { bytes: contentLen });
 
       const invocation = await this.getCodexInvocation();
       if (!invocation) {
-        const err = '未找到 Codex CLI，请在设置中配置 promptHub.local.codexPath，或设置环境变量 CODEX_BIN，或确保 PATH 中可直接执行 codex';
-        console.error(`${LOG_PREFIX} ${err}`);
+        const err = '未找到 Codex CLI，请在设置中配置 otter.local.codexPath，或设置环境变量 CODEX_BIN，或确保 PATH 中可直接执行 codex';
+        logger.error(`${LOG_PREFIX} ${err}`);
         throw new Error(err);
       }
-      console.log(`${LOG_PREFIX} 检测到 Codex:`, invocation.displayName);
+      logger.debug(`${LOG_PREFIX} 检测到 Codex`, invocation.displayName);
 
       // 注意：Codex CLI 的可用模型与账号/提供商相关（例如 ChatGPT 账号不一定支持 Claude 模型）
       // 留空时交由 Codex CLI 使用其默认模型（更稳妥）
       const model = this.config.get<string>('local.codexModel', '').trim();
-      console.log(`${LOG_PREFIX} 模型配置:`, model || '(默认模型)');
+      logger.debug(`${LOG_PREFIX} 模型配置`, model || '(默认模型)');
 
       const prompt = `请分析以下 Prompt 内容，生成一个简短的中文标题（5-10个字）和一个最能代表该内容的 emoji。
 
@@ -237,9 +277,9 @@ export class LocalCodexProvider {
 3. 只返回 JSON 格式，不要任何其他文字说明
 4. JSON 格式示例：{"name":"你生成的标题","emoji":"🎯"}
 
-以下是要分析的内容：
+      以下是要分析的内容：
 ${content.substring(0, 2000)}`;
-      console.log(`${LOG_PREFIX} 生成 Prompt 长度: ${prompt.length} 字节`);
+      logger.debug(`${LOG_PREFIX} 生成 Prompt 长度`, { bytes: prompt.length });
 
       const startedAt = Date.now();
       const { stdout, stderr } = await this.runCodexCli(
@@ -252,40 +292,35 @@ ${content.substring(0, 2000)}`;
           ...(model ? ['--model', model] : []),
           prompt,
         ],
-        30000,
+        timeoutMs,
         1024 * 1024
       );
       const elapsed = Date.now() - startedAt;
-      console.log(`${LOG_PREFIX} 执行完成, 耗时: ${elapsed}ms`);
+      logger.debug(`${LOG_PREFIX} 执行完成`, { elapsedMs: elapsed });
 
       if (stderr) {
-        console.warn(`${LOG_PREFIX} stderr:`, stderr.slice(0, 500));
+        logger.warn(`${LOG_PREFIX} stderr`, stderr.slice(0, 500));
       }
 
-      console.log(`${LOG_PREFIX} stdout 长度: ${stdout.length} 字节`);
-      if (stdout.length <= 500) {
-        console.log(`${LOG_PREFIX} stdout 内容:`, stdout);
-      } else {
-        console.log(`${LOG_PREFIX} stdout 内容 (前500字):`, stdout.slice(0, 500));
-        console.log(`${LOG_PREFIX} stdout 完整内容:`, stdout);
-      }
+      logger.debug(`${LOG_PREFIX} stdout 长度`, { bytes: stdout.length });
+      logger.debug(`${LOG_PREFIX} stdout 前500字`, stdout.slice(0, 500));
 
       // 解析响应 - 查找 JSON（匹配最后一个，避免匹配到示例）
       const jsonMatches = stdout.match(/\{[^}]*"name"[^}]*"emoji"[^}]*\}/g);
       if (jsonMatches && jsonMatches.length > 0) {
         // 取最后一个匹配（通常是实际的生成结果，而不是示例）
         const lastMatch = jsonMatches[jsonMatches.length - 1];
-        console.log(`${LOG_PREFIX} 找到 ${jsonMatches.length} 个 JSON，使用最后一个:`, lastMatch);
+        logger.debug(`${LOG_PREFIX} 找到 JSON`, { count: jsonMatches.length });
         const parsed = JSON.parse(lastMatch);
-        console.log(`${LOG_PREFIX} 解析结果:`, parsed);
+        logger.debug(`${LOG_PREFIX} 解析结果`, parsed);
         return { name: parsed.name, emoji: parsed.emoji };
       }
 
-      console.error(`${LOG_PREFIX} 未能从响应中匹配 JSON 格式`);
+      logger.error(`${LOG_PREFIX} 未能从响应中匹配 JSON 格式`);
       throw new Error('无法从 Codex 响应中解析 JSON');
     } catch (error) {
-      const e: any = error;
-      console.error(`${LOG_PREFIX} 失败:`, {
+      const e = error as { message?: string; code?: unknown; signal?: unknown; killed?: unknown };
+      logger.error(`${LOG_PREFIX} 失败`, {
         message: e?.message || String(error),
         code: e?.code,
         signal: e?.signal,
@@ -298,7 +333,7 @@ ${content.substring(0, 2000)}`;
   async generateMetaBatch(items: BatchMetaRequestItem[]): Promise<BatchMetaResultItem[]> {
     const invocation = await this.getCodexInvocation();
     if (!invocation) {
-      throw new Error('未找到 Codex CLI，请在设置中配置 promptHub.local.codexPath，或设置环境变量 CODEX_BIN，或确保 PATH 中可直接执行 codex');
+      throw new Error('未找到 Codex CLI，请在设置中配置 otter.local.codexPath，或设置环境变量 CODEX_BIN，或确保 PATH 中可直接执行 codex');
     }
 
     const maxChunkSize = this.config.get<number>('ai.batchChunkSize', 10);
@@ -371,10 +406,10 @@ ${content.substring(0, 2000)}`;
         60000
       );
       const elapsed = Date.now() - startedAt;
-      console.log(`${LOG_PREFIX} 执行完成, 耗时: ${elapsed}ms, items=${safeItems.length}`);
+      logger.debug(`${LOG_PREFIX} 执行完成`, { elapsedMs: elapsed, items: safeItems.length });
 
       if (stderr) {
-        console.warn(`${LOG_PREFIX} stderr:`, stderr.slice(0, 500));
+        logger.warn(`${LOG_PREFIX} stderr`, stderr.slice(0, 500));
       }
 
       const parsed = extractJsonArray<Record<string, unknown>>(stdout);
@@ -412,7 +447,7 @@ ${content.substring(0, 2000)}`;
 
       return results;
     } catch (error) {
-      console.error(`${LOG_PREFIX} 失败，将降级为逐个处理:`, error instanceof Error ? error.message : String(error));
+      logger.error(`${LOG_PREFIX} 失败，将降级为逐个处理`, error instanceof Error ? error.message : String(error));
 
       const results: BatchMetaResultItem[] = [];
       for (const req of safeItems) {
@@ -432,23 +467,24 @@ ${content.substring(0, 2000)}`;
    */
   async optimize(content: string): Promise<string> {
     const LOG_PREFIX = '[LocalCodexProvider] optimize';
+    const timeoutMs = this.config.get<number>('local.codexTimeoutMs', 10000);
     try {
-      console.log(`${LOG_PREFIX} 开始执行`);
-      console.log(`${LOG_PREFIX} 输入内容长度: ${content.length} 字节`);
+      logger.debug(`${LOG_PREFIX} 开始执行`);
+      logger.debug(`${LOG_PREFIX} 输入内容长度`, { bytes: content.length });
 
       const invocation = await this.getCodexInvocation();
       if (!invocation) {
         const err = '未找到 Codex CLI';
-        console.error(`${LOG_PREFIX} ${err}`);
+        logger.error(`${LOG_PREFIX} ${err}`);
         throw new Error(err);
       }
-      console.log(`${LOG_PREFIX} 检测到 Codex:`, invocation.displayName);
+      logger.debug(`${LOG_PREFIX} 检测到 Codex`, invocation.displayName);
 
       const model = this.config.get<string>('local.codexModel', '').trim();
-      console.log(`${LOG_PREFIX} 模型配置:`, model || '(默认模型)');
+      logger.debug(`${LOG_PREFIX} 模型配置`, model || '(默认模型)');
 
       const prompt = `请优化以下 Prompt 文本，使其更清晰简洁，保持中文 Markdown 格式。只返回优化后的文本，不要其他说明。\n\n${content}`;
-      console.log(`${LOG_PREFIX} 生成 Prompt 长度: ${prompt.length} 字节`);
+      logger.debug(`${LOG_PREFIX} 生成 Prompt 长度`, { bytes: prompt.length });
 
       const startedAt = Date.now();
       const { stdout, stderr } = await this.runCodexCli(
@@ -461,23 +497,23 @@ ${content.substring(0, 2000)}`;
           ...(model ? ['--model', model] : []),
           prompt,
         ],
-        60000
+        timeoutMs
       );
       const elapsed = Date.now() - startedAt;
-      console.log(`${LOG_PREFIX} 执行完成, 耗时: ${elapsed}ms`);
+      logger.debug(`${LOG_PREFIX} 执行完成`, { elapsedMs: elapsed });
 
       if (stderr) {
-        console.warn(`${LOG_PREFIX} stderr:`, stderr.slice(0, 500));
+        logger.warn(`${LOG_PREFIX} stderr`, stderr.slice(0, 500));
       }
 
-      console.log(`${LOG_PREFIX} stdout 长度: ${stdout.length} 字节`);
+      logger.debug(`${LOG_PREFIX} stdout 长度`, { bytes: stdout.length });
       const result = stdout.trim() || content;
-      console.log(`${LOG_PREFIX} 返回结果长度: ${result.length} 字节`);
+      logger.debug(`${LOG_PREFIX} 返回结果长度`, { bytes: result.length });
 
       return result;
     } catch (error) {
-      const e: any = error;
-      console.error(`${LOG_PREFIX} 失败:`, {
+      const e = error as { message?: string; code?: unknown; signal?: unknown; killed?: unknown };
+      logger.error(`${LOG_PREFIX} 失败`, {
         message: e?.message || String(error),
         code: e?.code,
         signal: e?.signal,
@@ -495,21 +531,21 @@ ${content.substring(0, 2000)}`;
     if (this.cachedCodexPath !== undefined) return this.cachedCodexPath;
 
     const LOG_PREFIX = '[LocalCodexProvider] getCodexPath';
-    console.log(`${LOG_PREFIX} 开始检测 Codex CLI 路径`);
+    logger.debug(`${LOG_PREFIX} 开始检测 Codex CLI 路径`);
 
     // 1. 从配置读取
     const configured = this.config.get<string>('local.codexPath');
     if (configured) {
       const resolved = this.resolvePath(configured);
       const ok = await this.fileExists(resolved);
-      console.log(`${LOG_PREFIX} 配置 local.codexPath:`, configured, '=>', resolved, 'exists=', ok);
+      logger.debug(`${LOG_PREFIX} 配置 local.codexPath`, { configured, resolved, exists: ok });
       if (ok) {
         this.cachedCodexPath = resolved;
         this.cachedInvocation = undefined;
         return resolved;
       }
     } else {
-      console.log(`${LOG_PREFIX} 配置 local.codexPath 为空，跳过配置路径检测`);
+      logger.debug(`${LOG_PREFIX} 配置 local.codexPath 为空，跳过配置路径检测`);
     }
 
     // 2. 从环境变量读取
@@ -517,20 +553,20 @@ ${content.substring(0, 2000)}`;
     if (envCodexBin) {
       const resolved = this.resolvePath(envCodexBin);
       const ok = await this.fileExists(resolved);
-      console.log(`${LOG_PREFIX} 环境变量 CODEX_BIN:`, envCodexBin, '=>', resolved, 'exists=', ok);
+      logger.debug(`${LOG_PREFIX} 环境变量 CODEX_BIN`, { raw: envCodexBin, resolved, exists: ok });
       if (ok) {
         this.cachedCodexPath = resolved;
         this.cachedInvocation = undefined;
         return resolved;
       }
     } else {
-      console.log(`${LOG_PREFIX} 环境变量 CODEX_BIN 未设置，跳过`);
+      logger.debug(`${LOG_PREFIX} 环境变量 CODEX_BIN 未设置，跳过`);
     }
 
     // 3. 自动检测：优先从 PATH 中找（对齐 aicliDemo 的行为）
     const fromPath = await this.detectCodexFromPath();
     if (fromPath) {
-      console.log(`${LOG_PREFIX} 从 PATH 检测到 Codex CLI:`, fromPath);
+      logger.debug(`${LOG_PREFIX} 从 PATH 检测到 Codex CLI`, fromPath);
       this.cachedCodexPath = fromPath;
       this.cachedInvocation = undefined;
       return fromPath;
@@ -544,7 +580,7 @@ ${content.substring(0, 2000)}`;
       return detectedPath;
     }
 
-    console.warn(`${LOG_PREFIX} 未找到 Codex CLI：已尝试 配置/local.codexPath、环境变量 CODEX_BIN、PATH(where/which)、常见目录`);
+    logger.warn(`${LOG_PREFIX} 未找到 Codex CLI：已尝试 配置/local.codexPath、环境变量 CODEX_BIN、PATH(where/which)、常见目录`);
     this.cachedCodexPath = null;
     return null;
   }
@@ -573,7 +609,7 @@ ${content.substring(0, 2000)}`;
     const LOG_PREFIX = '[LocalCodexProvider] detectCodexFromPath';
     try {
       if (process.platform === 'win32') {
-        console.log(`${LOG_PREFIX} Windows 平台，使用 where 命令`);
+        logger.debug(`${LOG_PREFIX} Windows 平台，使用 where 命令`);
         return (
           await this.detectFromWhere('codex.exe') ||
           await this.detectFromWhere('codex.cmd') ||
@@ -582,17 +618,17 @@ ${content.substring(0, 2000)}`;
         );
       }
 
-      console.log(`${LOG_PREFIX} Unix/macOS 平台，使用 which 命令`);
+      logger.debug(`${LOG_PREFIX} Unix/macOS 平台，使用 which 命令`);
       const { stdout } = await execAsync('which codex', { timeout: 5000 });
       const first = (stdout || '').split(/\r?\n/).map((s) => s.trim()).find(Boolean);
       if (first) {
         const ok = await this.fileExists(first);
-        console.log(`${LOG_PREFIX} which codex =>`, first, 'exists=', ok);
+        logger.debug(`${LOG_PREFIX} which codex`, { path: first, exists: ok });
         if (ok) return first;
       }
       return null;
     } catch (error) {
-      console.log(`${LOG_PREFIX} PATH 检测失败（可忽略）:`, error instanceof Error ? error.message : String(error));
+      logger.debug(`${LOG_PREFIX} PATH 检测失败（可忽略）`, error instanceof Error ? error.message : String(error));
       return null;
     }
   }
@@ -606,22 +642,22 @@ ${content.substring(0, 2000)}`;
         .map((s) => s.trim())
         .filter(Boolean);
 
-      console.log(`${LOG_PREFIX} where ${name} 找到 ${lines.length} 条结果`);
+      logger.debug(`${LOG_PREFIX} where 结果`, { name, count: lines.length });
       if (!lines.length) {
-        console.log(`${LOG_PREFIX} where ${name} 无结果`);
+        logger.debug(`${LOG_PREFIX} where 无结果`, { name });
         return null;
       }
 
       for (const p of lines) {
         const resolved = this.resolvePath(p);
         const ok = await this.fileExists(resolved);
-        console.log(`${LOG_PREFIX} where ${name} =>`, resolved, 'exists=', ok);
+        logger.debug(`${LOG_PREFIX} where 候选`, { name, path: resolved, exists: ok });
         if (ok) return resolved;
       }
 
       return null;
     } catch (error) {
-      console.log(`${LOG_PREFIX} where ${name} 执行失败（可忽略）:`, error instanceof Error ? error.message : String(error));
+      logger.debug(`${LOG_PREFIX} where 执行失败（可忽略）`, { name, error: error instanceof Error ? error.message : String(error) });
       return null;
     }
   }
@@ -646,17 +682,17 @@ ${content.substring(0, 2000)}`;
       '/opt/codex/codex',
     ];
 
-    console.log(`${LOG_PREFIX} 开始遍历 ${possiblePaths.length} 个常见路径`);
+    logger.debug(`${LOG_PREFIX} 开始遍历常见路径`, { count: possiblePaths.length });
     for (const p of possiblePaths) {
       const ok = await this.fileExists(p);
-      console.log(`${LOG_PREFIX} 常见路径探测:`, p, 'exists=', ok);
+      logger.debug(`${LOG_PREFIX} 常见路径探测`, { path: p, exists: ok });
       if (ok) {
-        console.log(`${LOG_PREFIX} 检测到 Codex:`, p);
+        logger.debug(`${LOG_PREFIX} 检测到 Codex`, p);
         return p;
       }
     }
 
-    console.log(`${LOG_PREFIX} 在常见路径中未找到 Codex`);
+    logger.debug(`${LOG_PREFIX} 在常见路径中未找到 Codex`);
     return null;
   }
 

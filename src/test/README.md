@@ -1,6 +1,6 @@
-# Prompt Hub 单元测试
+# Otter 单元测试
 
-本目录包含 Prompt Hub VSCode 扩展的单元测试。
+本目录包含 Otter VSCode 扩展的单元测试。
 
 ## 测试结构
 

@@ -156,7 +156,6 @@ export class PromptFileService {
     }
 
     // 光标定位：默认选中第一行标题中的“在此填写标题”方便用户直接修改
-    const firstLine = doc.lineAt(0).text;
     const titleKeyword = '在此填写标题';
     const titleStart = doc.getText().indexOf(titleKeyword);
     if (titleStart !== -1) {
@@ -229,17 +228,17 @@ export class PromptFileService {
     const base = path.basename(target, ext);
 
     let candidate = target;
-    let i = 1;
-    while (true) {
+    for (let i = 1; i <= 1000; i += 1) {
       try {
         await fs.access(candidate);
         // 文件已存在，尝试下一个
         candidate = path.join(dir, `${base}-${i}${ext}`);
-        i += 1;
       } catch {
         return candidate; // 不存在，可以使用
       }
     }
+
+    throw new Error(`无法生成不冲突的文件名（尝试次数过多）：${target}`);
   }
 
   /**

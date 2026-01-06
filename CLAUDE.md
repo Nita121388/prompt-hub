@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-**Prompt Hub** is a VSCode extension for unified AI prompt management. It provides features for:
+**Otter** is a VSCode extension for unified AI prompt management. It provides features for:
 - Creating prompts from selected text with smart name/emoji detection
 - Local storage (JSON format) with optional Git synchronization
 - Markdown mirroring (prompts can be edited as individual .md files)
@@ -162,38 +162,38 @@ Key interfaces:
 All settings are in `package.json` `contributes.configuration.properties`:
 
 **Storage**
-- `promptHub.storagePath`: Root directory for prompts (default: `~/.prompt-hub`)
-- `promptHub.storage.autoCreate`: Auto-create if missing (default: true)
+- `otter.storagePath`: Root directory for prompts (default: `~/.otter`)
+- `otter.storage.autoCreate`: Auto-create if missing (default: true)
 
 **Selection & Creation**
-- `promptHub.selection.autoDetectPromptName`: Parse `# prompt:` markers (default: true)
-- `promptHub.selection.removePromptMarker`: Strip marker after extraction (default: true)
-- `promptHub.ui.showEmojiPicker`: Show emoji picker during creation (default: true)
+- `otter.selection.autoDetectPromptName`: Parse `# prompt:` markers (default: true)
+- `otter.selection.removePromptMarker`: Strip marker after extraction (default: true)
+- `otter.ui.showEmojiPicker`: Show emoji picker during creation (default: true)
 
 **Markdown Files**
-- `promptHub.markdown.filenameTemplate`: Template for created .md files (default: `prompt-{timestamp}.md`)
-- `promptHub.markdown.askForFilename`: Prompt user for filename (default: false)
+- `otter.markdown.filenameTemplate`: Template for created .md files (default: `prompt-{timestamp}.md`)
+- `otter.markdown.askForFilename`: Prompt user for filename (default: false)
 
 **Git Sync**
-- `promptHub.git.enableSync`: Enable Git sync (default: false)
-- `promptHub.git.autoPullOnStartup`: Auto-pull on startup (default: false)
-- `promptHub.git.autoSyncOnSave`: Auto-sync after Markdown save (default: true)
-- `promptHub.git.autoSyncDelaySeconds`: Delay before sync (default: 60)
-- `promptHub.git.commitMessageTemplate`: Commit message template (default: `chore: sync prompts`)
+- `otter.git.enableSync`: Enable Git sync (default: false)
+- `otter.git.autoPullOnStartup`: Auto-pull on startup (default: false)
+- `otter.git.autoSyncOnSave`: Auto-sync after Markdown save (default: true)
+- `otter.git.autoSyncDelaySeconds`: Delay before sync (default: 60)
+- `otter.git.commitMessageTemplate`: Commit message template (default: `chore: sync prompts`)
 
 **AI Providers**
-- `promptHub.ai.provider`: Selected AI provider (default: empty) [openai|azure|gemini|deepseek|qwen|custom|local-claude|local-codex]
-- `promptHub.ai.model`: Model name (e.g., gpt-4o, qwen-turbo)
-- `promptHub.ai.baseUrl`: API base URL for custom providers
-- `promptHub.ai.batchDelayMs`: Delay between batch API calls (default: 500)
-- `promptHub.local.claudePath`: Path to claude CLI (auto-detect if empty)
-- `promptHub.local.claudeTimeoutMs`: Claude CLI timeout (default: 120000)
-- `promptHub.local.codexPath`: Path to codex executable (auto-detect if empty)
-- `promptHub.local.codexModel`: Model name for Codex
+- `otter.ai.provider`: Selected AI provider (default: empty) [openai|azure|gemini|deepseek|qwen|custom|local-claude|local-codex]
+- `otter.ai.model`: Model name (e.g., gpt-4o, qwen-turbo)
+- `otter.ai.baseUrl`: API base URL for custom providers
+- `otter.ai.batchDelayMs`: Delay between batch API calls (default: 500)
+- `otter.local.claudePath`: Path to claude CLI (auto-detect if empty)
+- `otter.local.claudeTimeoutMs`: Claude CLI timeout (default: 120000)
+- `otter.local.codexPath`: Path to codex executable (auto-detect if empty)
+- `otter.local.codexModel`: Model name for Codex
 
 **UI**
-- `promptHub.ui.sortBy`: Sort order [recent|name|created|usage] (default: recent)
-- `promptHub.statusBar.enable`: Show status bar icon (default: true)
+- `otter.ui.sortBy`: Sort order [recent|name|created|usage] (default: recent)
+- `otter.statusBar.enable`: Show status bar icon (default: true)
 
 API keys are stored in VSCode SecretStorage (not in settings.json).
 
@@ -235,7 +235,7 @@ Run with: `npm test` or use F5 with "Extension Tests" debug config.
 
 ### Debugging Git Operations
 - GitSyncService runs commands in the storagePath directory
-- Check git config: `cd ~/.prompt-hub && git status`
+- Check git config: `cd ~/.otter && git status`
 - Logs are printed to console (watch output in Extension Development Host)
 
 ## Important Codebase Notes

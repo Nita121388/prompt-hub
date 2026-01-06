@@ -1,20 +1,29 @@
 .vscode/**
 .vscode-test/**
 .git/**
+.codepath/**
+.gitignore
 
 src/**
 out/test/**
 testdata/**
-docs/**
 image/**
 scripts/**
+docs/**
+notes/**
 
 **/*.map
 **/*.ts
+**/*.md
+!README.md
+!CHANGELOG.md
 
 *.vsix
 *.log
+*.txt
+*.backup
 
 tsconfig.json
 .eslintrc.json
 .prettierrc.json
+test-*.js

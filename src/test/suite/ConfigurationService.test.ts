@@ -22,7 +22,7 @@ suite('ConfigurationService Test Suite', () => {
     mockContext = {
       secrets: secretStorage,
       extension: {
-        id: 'test.prompt-hub',
+        id: 'test.otter',
       },
     } as any;
 

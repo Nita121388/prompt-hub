@@ -36,7 +36,7 @@ suite('MarkdownPromptParser Test Suite', () => {
       '',
       '第二行内容。',
       '',
-      '<!-- PromptHub:id=legacy-id -->',
+      '<!-- Otter:id=legacy-id -->',
       '',
     ].join('\n');
 
@@ -99,4 +99,3 @@ suite('MarkdownPromptParser Test Suite', () => {
     assert.deepStrictEqual(result.tags, ['single-tag']);
   });
 });
-

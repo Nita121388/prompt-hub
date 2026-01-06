@@ -3,6 +3,7 @@ import { Prompt } from '../types/Prompt';
 import { PromptStorageService } from '../services/PromptStorageService';
 import { ConfigurationService } from '../services/ConfigurationService';
 import { UsageLogService } from '../services/UsageLogService';
+import { logger } from '../services/Logger';
 
 /**
  * Prompt TreeView Provider（支持标签分组）
@@ -15,19 +16,18 @@ export class PromptTreeProvider implements vscode.TreeDataProvider<vscode.TreeIt
     private storageService: PromptStorageService,
     private configService: ConfigurationService
   ) {
-    console.log('[PromptTreeProvider] 初始化TreeProvider');
+    logger.debug('[PromptTreeProvider] 初始化 TreeProvider');
     // 监听存储变更
     storageService.onDidChangePrompts(() => {
-      console.log('[PromptTreeProvider] 收到存储变更事件，触发刷新');
+      logger.debug('[PromptTreeProvider] 收到存储变更事件，触发刷新');
       this.refresh();
     });
   }
 
   /** 刷新视图 */
   refresh(): void {
-    console.log('[PromptTreeProvider] 执行refresh()，触发 _onDidChangeTreeData.fire()');
     this._onDidChangeTreeData.fire();
-    console.log('[PromptTreeProvider] 树视图刷新事件已触发');
+    logger.debug('[PromptTreeProvider] 树视图刷新事件已触发');
   }
 
   /** 获取树节点 */
@@ -37,13 +37,10 @@ export class PromptTreeProvider implements vscode.TreeDataProvider<vscode.TreeIt
 
   /** 获取子节点 */
   async getChildren(element?: vscode.TreeItem): Promise<vscode.TreeItem[]> {
-    console.log('[PromptTreeProvider] getChildren被调用，element:', element?.label);
-    let prompts = this.storageService.list();
-    console.log('[PromptTreeProvider] 获取到的Prompt数量:', prompts.length);
+    const prompts = this.storageService.list();
 
     // 获取排序方式
     const sortBy = this.configService.get<string>('ui.sortBy', 'recent');
-    console.log('[PromptTreeProvider] 排序方式:', sortBy);
 
     // 按排序方式排序
     if (sortBy === 'usage') {
@@ -119,7 +116,7 @@ class PromptTreeItem extends vscode.TreeItem {
     this.description = prompt.sourceFile ? 'md' : undefined;
     this.contextValue = 'prompt';
     this.command = {
-      command: 'promptHub.onPromptItemClick',
+      command: 'otter.onPromptItemClick',
       title: '打开/复制',
       arguments: [this.prompt],
     };

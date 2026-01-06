@@ -4,6 +4,7 @@ import * as os from 'os';
 import * as fs from 'fs/promises';
 import * as path from 'path';
 import { ConfigurationService } from './ConfigurationService';
+import { logger } from './Logger';
 
 /**
  * Git 同步服务（最小可用实现）
@@ -26,9 +27,9 @@ export class GitSyncService {
     return this.config.getStoragePath();
   }
 
-  private logDebug(message: string, ...args: any[]): void {
+  private logDebug(message: string, ...args: unknown[]): void {
     if (!this.debugLogEnabled) return;
-    console.log(message, ...args);
+    logger.debug(message, ...args);
   }
 
   private sanitizeRemoteUrl(url: string): string {
@@ -258,7 +259,7 @@ export class GitSyncService {
 
     const url = (remoteUrl ?? this.getConfiguredRemoteUrl()).trim();
     if (!url) {
-      throw new Error('未配置远程仓库 URL，请在设置中填写 promptHub.git.remoteUrl，或通过配置向导设置。');
+      throw new Error('未配置远程仓库 URL，请在设置中填写 otter.git.remoteUrl，或通过配置向导设置。');
     }
 
     await this.setOriginRemoteUrl(url);
@@ -359,7 +360,7 @@ export class GitSyncService {
 
   /**
    * 新设备/新目录导入：在 storagePath 内初始化仓库并从远端拉取内容。
-   * 说明：不依赖目录必须为空，避免与 PromptHub 自动创建 prompts.json 冲突。
+   * 说明：不依赖目录必须为空，避免与 Otter 自动创建 prompts.json 冲突。
    */
   async importFromRemote(remoteUrl?: string): Promise<void> {
     this.lastImportBackupDir = null;
@@ -413,7 +414,7 @@ export class GitSyncService {
 
       // 仅备份“会阻塞 checkout 的冲突路径”，导入后再放回原位置（同名冲突则自动改名保留）
       const stamp = this.formatTimestampForFolderName(new Date());
-      const backupDir = path.join(os.tmpdir(), `prompt-hub-import-backup-${stamp}`);
+      const backupDir = path.join(os.tmpdir(), `otter-import-backup-${stamp}`);
 
       const conflictRelPaths = this.extractConflictingPathsFromGitMessage(message);
       this.logDebug(
@@ -425,7 +426,7 @@ export class GitSyncService {
       if (!conflictRelPaths.length) {
         // 理论上 Git 会列出冲突路径；若解析失败，给出更明确的提示
         throw new Error(
-          `导入远端失败：Git 提示存在未跟踪文件冲突，但未能解析冲突文件列表。请开启 promptHub.git.debugLog 后重试并提供日志。原始信息：${message}`
+          `导入远端失败：Git 提示存在未跟踪文件冲突，但未能解析冲突文件列表。请开启 otter.git.debugLog 后重试并提供日志。原始信息：${message}`
         );
       }
 
@@ -522,7 +523,7 @@ export class GitSyncService {
 
       if (isAutostashUnsupported) {
         throw new Error(
-          '当前 Git 版本不支持 `git pull --rebase --autostash`。请升级 Git，或在设置中关闭 `promptHub.git.pullRebaseAutostash` 后再重试（关闭后需要你手动 commit/stash）。'
+          '当前 Git 版本不支持 `git pull --rebase --autostash`。请升级 Git，或在设置中关闭 `otter.git.pullRebaseAutostash` 后再重试（关闭后需要你手动 commit/stash）。'
         );
       }
 
@@ -532,7 +533,7 @@ export class GitSyncService {
 
       if (isDirtyWorktreeRebaseBlocked && !this.pullRebaseAutostashEnabled) {
         throw new Error(
-          '本地存在未提交的改动，`git pull --rebase` 无法继续。建议开启设置 `promptHub.git.pullRebaseAutostash`（让 Git 自动暂存/恢复改动），或手动执行 `git stash`/`git commit` 后再拉取。'
+          '本地存在未提交的改动，`git pull --rebase` 无法继续。建议开启设置 `otter.git.pullRebaseAutostash`（让 Git 自动暂存/恢复改动），或手动执行 `git stash`/`git commit` 后再拉取。'
         );
       }
 
@@ -546,7 +547,7 @@ export class GitSyncService {
     if (!(await this.isGitRepo())) {
       const url = this.getConfiguredRemoteUrl();
       if (!url) {
-        throw new Error('当前存储目录不是 Git 仓库，且未配置 promptHub.git.remoteUrl，无法自动拉取。');
+        throw new Error('当前存储目录不是 Git 仓库，且未配置 otter.git.remoteUrl，无法自动拉取。');
       }
       await this.importFromRemote(url);
       return;
@@ -630,7 +631,7 @@ export class GitSyncService {
 
     const untracked = await this.listUntrackedFiles();
     const stamp = this.formatTimestampForFolderName(new Date());
-    const backupDir = path.join(os.tmpdir(), `prompt-hub-untracked-backup-${stamp}`);
+    const backupDir = path.join(os.tmpdir(), `otter-untracked-backup-${stamp}`);
     await fs.mkdir(backupDir, { recursive: true });
 
     this.logDebug(
@@ -787,13 +788,13 @@ export class GitSyncService {
       try {
         await this.sync();
         vscode.window.setStatusBarMessage(
-          'Prompt Hub: Git 自动同步完成',
+          'Otter: Git 自动同步完成',
           3000
         );
       } catch (error) {
         console.error('[GitSyncService] 自动同步失败:', error);
         vscode.window.showErrorMessage(
-          `Prompt Hub: Git 自动同步失败：${
+          `Otter: Git 自动同步失败：${
             error instanceof Error ? error.message : String(error)
           }`
         );

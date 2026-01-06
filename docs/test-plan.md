@@ -33,9 +33,9 @@
 | TC14 | 首次使用引导 - 完整流程 | 全新安装插件 → 1秒后启动向导 → 依次完成 5 步配置 → 点击"完成" | globalState 记录 onboardingCompleted=true；配置项正确写入；向导不再自动弹出 |
 | TC15 | 首次使用引导 - 跳过步骤 | 向导步骤 2 点击"使用默认设置" | 跳过后续步骤，直接跳转到完成页面；使用默认配置；可通过命令重新启动向导 |
 | TC16 | 首次使用引导 - 中途取消 | 向导步骤 3 关闭 QuickPick | 已配置的前 2 步保留；onboardingCompleted=false；下次激活继续弹出向导 |
-| TC17 | 首次使用引导 - 重启向导 | 执行"Prompt Hub: 重新开始引导"命令 | 清除 onboardingCompleted 标记；重新启动 5 步向导；可重新配置所有选项 |
+| TC17 | 首次使用引导 - 重启向导 | 执行"Otter: 重新开始引导"命令 | 清除 onboardingCompleted 标记；重新启动 5 步向导；可重新配置所有选项 |
 | TC18 | 首次使用引导 - Git 检测 | 向导步骤 3 自动检测存储路径 | 如已是 Git 仓库，显示"已检测到 Git 仓库"；否则提供"初始化"选项 |
-| TC19 | 快速打开设置 - 命令面板 | Ctrl+Shift+P → 输入"Prompt Hub: 打开设置" | 打开 VSCode 设置页面并筛选到 @ext:publisher.prompt-hub |
+| TC19 | 快速打开设置 - 命令面板 | Ctrl+Shift+P → 输入"Otter: 打开设置" | 打开 VSCode 设置页面并筛选到 @ext:publisher.otter |
 | TC20 | 快速打开设置 - TreeView 工具栏 | 点击活动栏 TreeView 顶部设置图标 | 打开 VSCode 设置页面并筛选到插件配置 |
 | TC21 | 快速打开设置 - 状态栏警告 | 配置 Git 未设置 → 状态栏显示警告图标 → 点击 | 打开设置页面并定位到 Git 相关配置项 |
 | TC22 | 快速打开设置 - 右键菜单 | TreeView 右键任意 Prompt → 选择"打开设置" | 打开 VSCode 设置页面 |
@@ -44,8 +44,8 @@
 | TC25 | 选区智能识别 - 忽略空格 | 选中文本第一行为 `#  prompt  :  名称` → 创建 Prompt | 正确识别名称"名称"；多余空格被忽略 |
 | TC26 | 选区智能识别 - 无标记 fallback | 选中普通文本（无 `# prompt:` 标记）→ 创建 Prompt | 使用默认名称生成流程；正文包含所有选中内容 |
 | TC27 | 选区智能识别 - emoji 提取 | 选中文本第一行为 `# prompt: 😊 快乐提示` → 创建 Prompt | emoji 字段为"😊"；name 字段为"快乐提示"（不含 emoji） |
-| TC28 | 选区智能识别 - 配置开关 | promptHub.selection.autoDetectPromptName=false → 选中带标记文本 → 创建 Prompt | 不进行智能识别；使用默认流程；标记行保留在正文中 |
-| TC29 | 选区智能识别 - 标记移除配置 | promptHub.selection.removePromptMarker=false → 选中带标记文本 → 创建 Prompt | 识别名称和 emoji；但标记行保留在正文中 |
+| TC28 | 选区智能识别 - 配置开关 | otter.selection.autoDetectPromptName=false → 选中带标记文本 → 创建 Prompt | 不进行智能识别；使用默认流程；标记行保留在正文中 |
+| TC29 | 选区智能识别 - 标记移除配置 | otter.selection.removePromptMarker=false → 选中带标记文本 → 创建 Prompt | 识别名称和 emoji；但标记行保留在正文中 |
 
 ## 4. 缺陷管理与交付
 - 所有缺陷进入 issue tracker，标签示例：area/storage、area/ai、area/treeview、area/template、area/onboarding、area/selection。

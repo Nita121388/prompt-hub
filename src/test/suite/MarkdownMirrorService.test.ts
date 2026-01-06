@@ -1,5 +1,6 @@
 import * as assert from 'assert';
 import * as path from 'path';
+import * as os from 'os';
 import * as vscode from 'vscode';
 import { MarkdownMirrorService } from '../../services/MarkdownMirrorService';
 import { Prompt } from '../../types/Prompt';
@@ -58,7 +59,7 @@ suite('MarkdownMirrorService Test Suite', () => {
   }
 
   test('should create prompt using id from frontmatter', async () => {
-    const storagePath = path.join('test', 'prompt-storage');
+    const storagePath = path.join(os.tmpdir(), `otter-md-mirror-${Date.now()}`);
     const filePath = path.join(storagePath, 'custom.md');
 
     const storage = new InMemoryStorage() as any;
@@ -80,11 +81,11 @@ suite('MarkdownMirrorService Test Suite', () => {
     const created = storage.getById(idInFile);
     assert.ok(created, '应使用 frontmatter 的 id 创建 Prompt');
     assert.strictEqual(created?.name, '我的标题');
-    assert.strictEqual(created?.sourceFile, filePath);
+    assert.strictEqual((created?.sourceFile || '').toLowerCase(), filePath.toLowerCase());
   });
 
   test('should repair id mismatch by sourceFile and then update', async () => {
-    const storagePath = path.join('test', 'prompt-storage');
+    const storagePath = path.join(os.tmpdir(), `otter-md-mirror-${Date.now()}`);
     const filePath = path.join(storagePath, 'custom.md');
 
     const storage = new InMemoryStorage() as any;
@@ -121,4 +122,3 @@ suite('MarkdownMirrorService Test Suite', () => {
     assert.strictEqual(updated?.content, '新正文');
   });
 });
-

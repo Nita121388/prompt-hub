@@ -1,6 +1,7 @@
 import * as vscode from 'vscode';
 import * as path from 'path';
 import { ConfigurationService } from './ConfigurationService';
+import { enqueueByKey } from '../utils/WriteQueue';
 
 export interface UsageLogRecord {
   id: string;
@@ -27,13 +28,21 @@ export class UsageLogService {
   }
 
   async record(entry: UsageLogRecord): Promise<void> {
-    try {
-      const existing = await this.readAll();
-      existing.push(entry);
-      await vscode.workspace.fs.writeFile(this.fileUri, Buffer.from(JSON.stringify(existing, null, 2), 'utf8'));
-    } catch {
-      await vscode.workspace.fs.writeFile(this.fileUri, Buffer.from(JSON.stringify([entry], null, 2), 'utf8'));
-    }
+    await enqueueByKey(this.fileUri.fsPath, async () => {
+      try {
+        const existing = await this.readAll();
+        existing.push(entry);
+        await vscode.workspace.fs.writeFile(
+          this.fileUri,
+          Buffer.from(JSON.stringify(existing, null, 2), 'utf8')
+        );
+      } catch {
+        await vscode.workspace.fs.writeFile(
+          this.fileUri,
+          Buffer.from(JSON.stringify([entry], null, 2), 'utf8')
+        );
+      }
+    });
   }
 
   async readAll(): Promise<UsageLogRecord[]> {
@@ -47,4 +56,3 @@ export class UsageLogService {
     }
   }
 }
-

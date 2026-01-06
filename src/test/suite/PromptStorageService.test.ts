@@ -31,7 +31,7 @@ suite('PromptStorageService Test Suite', () => {
   setup(async () => {
     // 创建临时测试目录
     const tmpDir = os.tmpdir();
-    testStoragePath = path.join(tmpDir, `prompt-hub-test-${Date.now()}`);
+    testStoragePath = path.join(tmpDir, `otter-test-${Date.now()}`);
     testStorageFile = path.join(testStoragePath, 'prompts.json');
 
     mockConfigService = new MockConfigurationService();
@@ -318,8 +318,10 @@ suite('PromptStorageService Test Suite', () => {
 
     test('should search by name', () => {
       const results = storageService.search('JavaScript');
-      assert.strictEqual(results.length, 1);
-      assert.strictEqual(results[0].name, 'JavaScript Tutorial');
+      // search() 会同时匹配 name/content/tags，因此应命中两条（name 命中 + content 命中）
+      assert.strictEqual(results.length, 2);
+      assert.ok(results.some((r) => r.name === 'JavaScript Tutorial'));
+      assert.ok(results.some((r) => r.name === 'React Components'));
     });
 
     test('should search by content', () => {

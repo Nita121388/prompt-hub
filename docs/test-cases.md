@@ -1,6 +1,6 @@
-# Prompt Hub 测试用例（基于项目功能）
+# Otter 测试用例（基于项目功能）
 
-> 适用范围：VSCode 扩展 `Prompt Hub`（本地存储、Markdown 镜像、Git 同步、AI 生成/优化、TreeView 管理、首次使用向导等）
+> 适用范围：VSCode 扩展 `Otter`（本地存储、Markdown 镜像、Git 同步、AI 生成/优化、TreeView 管理、首次使用向导等）
 >
 > 用途：作为手工回归用例清单，也可按模块逐步转化为自动化（单元/集成/E2E）。
 
@@ -23,7 +23,7 @@
   - 云端：准备 1 个可用的 OpenAI 兼容 Key（或使用无 Key 的异常回归）
   - 本地：可选安装 `Claude Code CLI`/`Codex CLI`（用于 local provider 场景）
 - 测试数据：
-  - 存储目录（`promptHub.storagePath`）准备 5~10 个 Markdown Prompt 文件（含/不含 frontmatter、含/不含 emoji、含非法文件名字符等）
+  - 存储目录（`otter.storagePath`）准备 5~10 个 Markdown Prompt 文件（含/不含 frontmatter、含/不含 emoji、含非法文件名字符等）
   - 准备 1 份远程仓库数据：包含 `prompts.json` 与若干 `.md`，用于 Git 导入/同步
 
 ## 3. 用例列表
@@ -31,7 +31,7 @@
 ### 3.1 激活与存储初始化（PromptStorageService）
 
 #### PH-001（P0 / 功能）首次激活自动创建存储目录与 `prompts.json`
-- 前置条件：`promptHub.storagePath` 指向一个不存在的目录；`promptHub.storage.autoCreate=true`
+- 前置条件：`otter.storagePath` 指向一个不存在的目录；`otter.storage.autoCreate=true`
 - 步骤：
   1. 启动 VSCode（确保扩展被激活）
 - 预期结果：
@@ -40,7 +40,7 @@
   - TreeView 能正常显示（空列表或“暂无 Prompt”提示）
 
 #### PH-002（P0 / 异常）关闭自动创建时，存储目录不存在应提示错误
-- 前置条件：`promptHub.storagePath` 指向一个不存在的目录；`promptHub.storage.autoCreate=false`
+- 前置条件：`otter.storagePath` 指向一个不存在的目录；`otter.storage.autoCreate=false`
 - 步骤：
   1. 启动 VSCode
 - 预期结果：
@@ -58,7 +58,7 @@
 #### PH-004（P0 / 功能）切换 `storagePath` 后数据与视图正确刷新
 - 前置条件：准备 A/B 两个不同存储目录，分别包含不同 Prompt 数据
 - 步骤：
-  1. 在 VSCode 设置中修改 `promptHub.storagePath` 为另一个目录
+  1. 在 VSCode 设置中修改 `otter.storagePath` 为另一个目录
 - 预期结果：
   - 提示“已切换存储路径”
   - TreeView 列表刷新为新目录内容
@@ -103,7 +103,7 @@
 #### PH-020（P0 / 功能）按标签分组展示，“未分组”兜底生效
 - 前置条件：准备 1 个带 tags 的 Prompt + 1 个不带 tags 的 Prompt
 - 步骤：
-  1. 打开 Prompt Hub TreeView
+  1. 打开 Otter TreeView
 - 预期结果：
   - tags 各自形成分组节点
   - 无 tags 的 Prompt 归入“未分组”
@@ -111,7 +111,7 @@
 #### PH-021（P1 / 功能）排序：recent / name / created / usage
 - 前置条件：准备多个 Prompt；并产生不同的使用次数（复制/搜索会记录 usage log）
 - 步骤：
-  1. 分别设置 `promptHub.ui.sortBy=recent|name|created|usage`
+  1. 分别设置 `otter.ui.sortBy=recent|name|created|usage`
   2. 观察 TreeView 顺序
 - 预期结果：
   - `recent`：按 `updatedAt` 倒序
@@ -139,12 +139,12 @@
   - 不应创建任何 Prompt
 
 #### PH-031（P0 / 功能）识别 `# prompt:` 标记并提取 emoji + 名称
-- 前置条件：`promptHub.selection.autoDetectPromptName=true`；选区第一行形如 `# prompt: 😄 我的标题`
+- 前置条件：`otter.selection.autoDetectPromptName=true`；选区第一行形如 `# prompt: 😄 我的标题`
 - 步骤：
   1. 选中包含该首行的文本，执行“从选区创建”
 - 预期结果：
   - 输入框默认填充标题与 emoji
-  - 若 `promptHub.selection.removePromptMarker=true`：保存内容不包含首行标记
+  - 若 `otter.selection.removePromptMarker=true`：保存内容不包含首行标记
 
 #### PH-032（P1 / 兼容）回退识别 Markdown H1（`# 标题`）
 - 前置条件：选区第一行为 `# 😄 标题`（无 `# prompt:`）
@@ -155,7 +155,7 @@
   - 内容按配置决定是否移除首行
 
 #### PH-033（P1 / 功能）关闭自动识别后不提取标题
-- 前置条件：`promptHub.selection.autoDetectPromptName=false`
+- 前置条件：`otter.selection.autoDetectPromptName=false`
 - 步骤：
   1. 选中带 `# prompt:` 的文本，执行“从选区创建”
 - 预期结果：
@@ -195,7 +195,7 @@
 ### 3.5 “新建 Prompt 文件”（PromptFileService）
 
 #### PH-040（P0 / 功能）使用模板创建 Markdown 文件并自动打开
-- 前置条件：`promptHub.markdown.filenameTemplate=prompt-{timestamp}.md`
+- 前置条件：`otter.markdown.filenameTemplate=prompt-{timestamp}.md`
 - 步骤：
   1. 执行“新建 Prompt 文件”
 - 预期结果：
@@ -204,7 +204,7 @@
   - 文件在编辑器中打开，光标/选区定位到“在此填写标题”
 
 #### PH-041（P1 / 功能）询问文件名 + 非法字符清洗 + 自动补 `.md`
-- 前置条件：`promptHub.markdown.askForFilename=true`
+- 前置条件：`otter.markdown.askForFilename=true`
 - 步骤：
   1. 执行“新建 Prompt 文件”
   2. 输入 `我的:Prompt*测试`（不带 `.md`）
@@ -213,7 +213,7 @@
   - 若文件名冲突，自动追加 `-1/-2/...`
 
 #### PH-042（P1 / 异常）模板依赖 `{name}/{emoji}` 但为空时应兜底
-- 前置条件：`promptHub.markdown.filenameTemplate={name}.md` 或 `{emoji}-{name}.md`
+- 前置条件：`otter.markdown.filenameTemplate={name}.md` 或 `{emoji}-{name}.md`
 - 步骤：
   1. 执行“新建 Prompt 文件”（此时无上下文 name/emoji）
 - 预期结果：
@@ -310,14 +310,14 @@
 ### 3.8 Markdown 镜像（MarkdownMirrorService）
 
 #### PH-070（P1 / 功能）关闭镜像后保存 Markdown 不应改动 JSON
-- 前置条件：`promptHub.markdown.enableMirror=false`
+- 前置条件：`otter.markdown.enableMirror=false`
 - 步骤：
   1. 在存储目录内打开某个 `.md` 并保存修改
 - 预期结果：
   - 不触发 JSON 同步（TreeView 不变化或不更新内容）
 
 #### PH-071（P0 / 功能）保存存储目录内 Markdown => 同步到 JSON（新增/更新）
-- 前置条件：`promptHub.markdown.enableMirror=true`
+- 前置条件：`otter.markdown.enableMirror=true`
 - 步骤：
   1. 修改存储目录内某个 `.md` 的标题/正文/tags 并保存
 - 预期结果：
@@ -325,7 +325,7 @@
   - TreeView 实时刷新（或保存后可刷新看到变化）
 
 #### PH-072（P1 / 安全）保存非存储目录 Markdown 不应被镜像处理
-- 前置条件：`promptHub.storagePath` 指向目录 A；另有目录 B 的 Markdown
+- 前置条件：`otter.storagePath` 指向目录 A；另有目录 B 的 Markdown
 - 步骤：
   1. 在目录 B 打开 `.md` 保存
 - 预期结果：
@@ -341,7 +341,7 @@
   - 编辑器自动切换到新文件
 
 #### PH-074（P1 / 功能）frontmatter `rename: false` 时保存不应触发自动重命名
-- 前置条件：`promptHub.markdown.autoRenameOnSave=true`；某 `.md` 的 frontmatter 显式设置 `rename: false`
+- 前置条件：`otter.markdown.autoRenameOnSave=true`；某 `.md` 的 frontmatter 显式设置 `rename: false`
 - 步骤：
   1. 修改该文件标题并保存
 - 预期结果：
@@ -349,7 +349,7 @@
   - JSON 仍会更新 Prompt 的 name/emoji/content（仅不改文件名）
 
 #### PH-075（P1 / 功能）关闭 `markdown.autoRenameOnSave` 后保存不应自动重命名
-- 前置条件：`promptHub.markdown.autoRenameOnSave=false`
+- 前置条件：`otter.markdown.autoRenameOnSave=false`
 - 步骤：
   1. 修改存储目录内 `.md` 的标题并保存
 - 预期结果：
@@ -359,7 +359,7 @@
 ### 3.9 Git 导入与同步（GitSyncService）
 
 #### PH-080（P0 / 功能）新设备一键导入：非 Git 目录 + 配置远程 => 导入成功
-- 前置条件：`storagePath` 不是 Git 仓库；设置 `promptHub.git.remoteUrl` 为可访问远程仓库
+- 前置条件：`storagePath` 不是 Git 仓库；设置 `otter.git.remoteUrl` 为可访问远程仓库
 - 步骤：
   1. 执行“Git 拉取/导入”
 - 预期结果：
@@ -369,8 +369,8 @@
 #### PH-081（P1 / 功能）同步：有本地改动时自动 add/commit（按配置决定是否 push）
 - 前置条件：`storagePath` 已是 Git 仓库；制造 1 个变更（新增/编辑 Prompt）
 - 步骤：
-  1. 将 `promptHub.git.enableSync=false`，执行“Git 同步”
-  2. 将 `promptHub.git.enableSync=true`，再次执行“Git 同步”
+  1. 将 `otter.git.enableSync=false`，执行“Git 同步”
+  2. 将 `otter.git.enableSync=true`，再次执行“Git 同步”
 - 预期结果：
   - 第 1 次：完成 add/commit，但不进行 pull/push
   - 第 2 次：完成 pull(rebase) + push（远程可见提交）
@@ -385,13 +385,13 @@
 #### PH-083（P1 / 安全）日志中不应泄露带 Token 的远程 URL
 - 前置条件：将远程 URL 配置为包含用户名/Token 的 HTTPS URL（用于验证脱敏）
 - 步骤：
-  1. 开启 `promptHub.git.debugLog=true`
+  1. 开启 `otter.git.debugLog=true`
   2. 执行一次 Git 操作
 - 预期结果：
   - 诊断日志中的远程 URL 被脱敏（不出现明文 token/password）
 
 #### PH-084（P1 / 功能）自动同步：保存存储目录内 Markdown 后延迟触发 sync
-- 前置条件：`promptHub.git.enableSync=true`；`promptHub.git.autoSyncOnSave=true`；`promptHub.git.autoSyncDelaySeconds` 设置为较小值（如 5~10）
+- 前置条件：`otter.git.enableSync=true`；`otter.git.autoSyncOnSave=true`；`otter.git.autoSyncDelaySeconds` 设置为较小值（如 5~10）
 - 步骤：
   1. 修改存储目录内 `.md` 并保存
   2. 等待延迟时间
@@ -424,7 +424,7 @@
   - 之前未跟踪文件可能被删除（符合预期风险）
 
 #### PH-087（P1 / 异常）备份目录不应被导入为 Prompt（避免 TreeView 污染）
-- 前置条件：存储目录内存在 `.prompt-hub-backup-xxxx` 目录，且其中包含 `.md` 文件（可通过导入备份或手工创建模拟）
+- 前置条件：存储目录内存在 `.otter-backup-xxxx` 目录，且其中包含 `.md` 文件（可通过导入备份或手工创建模拟）
 - 步骤：
   1. 执行“刷新视图”或触发一次 Git 操作后自动刷新
 - 预期结果：
@@ -434,15 +434,15 @@
 ### 3.10 AI 生成/优化（AIService + 本地 Provider）
 
 #### PH-090（P0 / 异常）未配置 AI Provider 时应给出引导提示并不改变内容
-- 前置条件：`promptHub.ai.provider` 为空
+- 前置条件：`otter.ai.provider` 为空
 - 步骤：
   1. 对某 Prompt 执行“AI 优化”或“生成标题/emoji”
 - 预期结果：
-  - 提示先运行“配置向导”或设置 `promptHub.ai.provider`
+  - 提示先运行“配置向导”或设置 `otter.ai.provider`
   - Prompt 内容/元信息不被修改
 
 #### PH-091（P1 / 功能）云端 Provider：首次使用会提示输入 Key 并保存到 SecretStorage
-- 前置条件：`promptHub.ai.provider=openai`（或其他云端 provider）；SecretStorage 中无对应 Key
+- 前置条件：`otter.ai.provider=openai`（或其他云端 provider）；SecretStorage 中无对应 Key
 - 步骤：
   1. 执行一次 AI 操作
   2. 输入 Key 并确认
@@ -452,7 +452,7 @@
   - AI 成功时更新 Prompt（并同步 Markdown 标题/正文）
 
 #### PH-092（P1 / 异常）云端 API 失败（Key 错误/BaseUrl 错误）应回退不改内容
-- 前置条件：配置错误 Key 或错误 `promptHub.ai.baseUrl`
+- 前置条件：配置错误 Key 或错误 `otter.ai.baseUrl`
 - 步骤：
   1. 执行“AI 优化”
 - 预期结果：
@@ -460,7 +460,7 @@
   - 返回原内容（不覆盖现有 Prompt）
 
 #### PH-093（P1 / 兼容）本地 Provider：CLI 不可用时提示并回退
-- 前置条件：`promptHub.ai.provider=local-claude` 或 `local-codex`；配置一个不存在的可执行路径
+- 前置条件：`otter.ai.provider=local-claude` 或 `local-codex`；配置一个不存在的可执行路径
 - 步骤：
   1. 执行“AI 优化”
 - 预期结果：
@@ -468,7 +468,7 @@
   - Prompt 内容保持不变
 
 #### PH-094（P1 / 功能）批量生成/批量优化的进度与统计正确
-- 前置条件：TreeView 可多选；至少选中 3 个 Prompt；设置 `promptHub.ai.batchDelayMs` 为较小值
+- 前置条件：TreeView 可多选；至少选中 3 个 Prompt；设置 `otter.ai.batchDelayMs` 为较小值
 - 步骤：
   1. 执行“批量生成标题和图标（选中）”或“批量优化提示词”
 - 预期结果：
@@ -490,11 +490,11 @@
   - 重置后 `onboardingCompleted` 变为 false，可再次弹出
 
 #### PH-101（P1 / 功能）状态栏入口显示/隐藏与 QuickPick 操作
-- 前置条件：`promptHub.statusBar.enable=true`
+- 前置条件：`otter.statusBar.enable=true`
 - 步骤：
   1. 点击状态栏图标
   2. 依次选择“新建/搜索/从选区创建/刷新/Git 拉取/导入/Git 同步/配置向导/打开设置”
-  3. 设置 `promptHub.statusBar.enable=false`
+  3. 设置 `otter.statusBar.enable=false`
 - 预期结果：
   - QuickPick 能正确执行对应操作
   - 关闭配置后状态栏入口隐藏
@@ -502,11 +502,11 @@
 ### 3.12 路径变量解析（ConfigurationService）
 
 #### PH-110（P1 / 兼容）`storagePath` 支持 `~` / `${workspaceFolder}` / 环境变量
-- 前置条件：分别设置 `promptHub.storagePath` 为：
-  - `~/.prompt-hub`
+- 前置条件：分别设置 `otter.storagePath` 为：
+  - `~/.otter`
   - `${workspaceFolder}/.prompts`
-  - `${env:USERPROFILE}/.prompt-hub`（Windows）或 `${env:HOME}/.prompt-hub`
-  - `%USERPROFILE%\\.prompt-hub`（Windows）
+  - `${env:USERPROFILE}/.otter`（Windows）或 `${env:HOME}/.otter`
+  - `%USERPROFILE%\\.otter`（Windows）
 - 步骤：
   1. 逐项设置并重载窗口
 - 预期结果：

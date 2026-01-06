@@ -104,8 +104,8 @@ tags: [prompt, code/review]
 ### 3.2 字段与数据模型映射
 
 - `id` → `Prompt.id`
-  - 与现有 HTML 注释 `<!-- PromptHub:id=... -->` 冗余；
-  - 过渡期建议两者都写，解析时优先 frontmatter。
+- 兼容 HTML 注释 `<!-- Otter:id=... -->`（同时兼容旧版 `<!-- PromptHub:id=... -->`）；
+- 过渡期建议两者都写，解析时优先 frontmatter。
 - `type` → 固定为 `"prompt"`：
   - 为未来扩展其他类型（如 `"snippet"`、`"template"`）预留。
 - `emoji` → `Prompt.emoji`
@@ -253,14 +253,14 @@ const base: Omit<Prompt, 'id'> = {
 
 3. ID 优先级：
 
-- `frontmatter.id` > HTML 注释中的 `PromptHub:id` > 依赖 `sourceFile` 匹配。
+- `frontmatter.id` > HTML 注释中的 `Otter:id`（兼容旧版 `PromptHub:id`） > 依赖 `sourceFile` 匹配。
 
 4. 导出 Markdown（`composeMarkdown`）：
 
 - 输出 Obsidian 风格 Markdown：
   - 前面加 frontmatter；
   - 标题使用 `# [emoji ]name`；
-  - 末尾保留 `<!-- PromptHub:id=... -->` 作为兼容标记。
+  - 末尾保留 `<!-- Otter:id=... -->` 作为兼容标记（仍能识别旧版 `PromptHub:id`）。
 
 ### 5.3 PromptFileService（新建文件模板）
 
@@ -282,7 +282,7 @@ private defaultMarkdownContent(): string {
     '',
     '在此编写 Prompt 正文内容...',
     '',
-    `<!-- PromptHub:id=${id} -->`,
+    `<!-- Otter:id=${id} -->`,
     '',
   ].join('\n');
 }
@@ -347,4 +347,3 @@ const titleMatch =
    - [ ] 按 6.2 的建议进行一次手工回归。
 
 > 执行时可以按“解析 → 同步 → 模板 → 测试”的顺序小步提交，降低一次性改动风险。
-

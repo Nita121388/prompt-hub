@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 /* eslint-disable no-console */
 /**
- * Prompt Hub AI Doctor：在终端快速诊断本地 Claude/Codex CLI 是否可用。
+ * Otter AI Doctor：在终端快速诊断本地 Claude/Codex CLI 是否可用。
  *
  * 设计目标：
  * - 默认“无副作用”：只做路径探测与环境信息输出
@@ -259,7 +259,7 @@ function quoteWindowsArg(text) {
 function probeClaude(bin, timeoutMs) {
   if (!bin) return { ok: false, error: '未检测到 claude 可执行文件' };
 
-  const prompt = '你好（本次为 Prompt Hub doctor 探测请求，仅用于验证 CLI 可用性）';
+  const prompt = '你好（本次为 Otter doctor 探测请求，仅用于验证 CLI 可用性）';
   const cmd = isWindows() && bin.toLowerCase().endsWith('.cmd')
     ? `cmd.exe /c ${quoteWindowsArg(`${bin} -p --output-format text "${prompt}"`)}`
     : `${bin} -p --output-format text "${prompt}"`;
@@ -277,7 +277,7 @@ function probeClaude(bin, timeoutMs) {
 function probeCodex(bin, timeoutMs) {
   if (!bin) return { ok: false, error: '未检测到 codex 可执行文件' };
 
-  const prompt = '你好（本次为 Prompt Hub doctor 探测请求，仅用于验证 CLI 可用性）';
+  const prompt = '你好（本次为 Otter doctor 探测请求，仅用于验证 CLI 可用性）';
   const cmd = isWindows() && bin.toLowerCase().endsWith('.cmd')
     ? `cmd.exe /c ${quoteWindowsArg(`${bin} exec --skip-git-repo-check --sandbox read-only "${prompt}"`)}`
     : `${bin} exec --skip-git-repo-check --sandbox read-only "${prompt}"`;
@@ -325,7 +325,7 @@ function main() {
     return;
   }
 
-  console.log('Prompt Hub AI Doctor');
+  console.log('Otter AI Doctor');
   console.log('time:', result.timestamp);
   console.log('node:', result.platform.node);
   console.log('os:', result.platform.os, 'arch:', result.platform.arch);
@@ -364,8 +364,8 @@ function main() {
   }
 
   console.log('[建议]');
-  console.log('  - Claude：优先在 VSCode 设置中配置 promptHub.local.claudePath（或设置 CLAUDE_BIN）');
-  console.log('  - Codex：优先在 VSCode 设置中配置 promptHub.local.codexPath（或设置 CODEX_BIN）');
+  console.log('  - Claude：优先在 VSCode 设置中配置 otter.local.claudePath（或设置 CLAUDE_BIN）');
+  console.log('  - Codex：优先在 VSCode 设置中配置 otter.local.codexPath（或设置 CODEX_BIN）');
   console.log('  - 如首次登录/网络慢：可用 --probe 观察是否超时，并适当调大 timeout');
 }
 

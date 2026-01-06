@@ -49,7 +49,7 @@
 ## 6. 依赖与约束
 - VSCode API：commands、window、workspace、TreeDataProvider、SecretStorage、Memento、Uri、env.clipboard、Progress API。
 - AI Provider：初期支持 OpenAI 兼容接口，可扩展 Azure OpenAI、通义千问等；需���许自定义 Base URL、超时与代理。
-- 文件系统：默认主存文件位于 `~/.prompt-hub/prompts.json`；空白模板与镜像目录均可配置；写入需处理同步盘锁定。
+- 文件系统：默认主存文件位于 `~/.otter/prompts.json`；空白模板与镜像目录均可配置；写入需处理同步盘锁定。
 - Git 命令：依赖系统已安装 git（2.40+），在 VSCode 内通过 Node 子进程执行；需处理 pull 冲突、网络失败与认证错误。
 - 离线约束：插件需在无网络环境下正常执行本地操作；AI/Git 功能应降级并提示。
 
@@ -71,15 +71,15 @@
 
 ### 8.1 触发时机
 - **首次激活**：用户首次安装插件并在 VSCode 中激活时，自动弹出引导向导。
-- **检测条件**：通过 `Memento.get('promptHub.onboardingCompleted')` 判断；未完成则启动引导。
-- **手动触发**：提供命令 `Prompt Hub: 重新运行配置向导`，允许用户随时重新配置。
+- **检测条件**：通过 `Memento.get('otter.onboardingCompleted')` 判断；未完成则启动引导。
+- **手动触发**：提供命令 `Otter: 重新运行配置向导`，允许用户随时重新配置。
 
 ### 8.2 引导流程
 
 #### 步骤 1：欢迎页面
 ```
 ┌─────────────────────────────────────────────┐
-│  🎉 欢迎使用 Prompt Hub                     │
+│  🎉 欢迎使用 Otter                     │
 │                                             │
 │  让我们花 2 分钟完成初始配置，开始高效管理  │
 │  您的 Prompt 资产。                         │
@@ -90,7 +90,7 @@
 
 **行为**：
 - **开始配置**：进入步骤 2
-- **使用默认设置**：跳过向导，使用 `~/.prompt-hub` 作为存储路径，不启用 AI 和 Git
+- **使用默认设置**：跳过向导，使用 `~/.otter` 作为存储路径，不启用 AI 和 Git
 - **稍后提醒**：关闭向导，下次启动 VSCode 时再次提示
 
 ---
@@ -103,7 +103,7 @@
 │  Prompt 将保存在此目录，支持以下场景：      │
 │                                             │
 │  ○ 本地存储（默认）                        │
-│     推荐：~/.prompt-hub                     │
+│     推荐：~/.otter                     │
 │                                             │
 │  ○ 云盘同步                                │
 │     示例：~/OneDrive/prompts                │
@@ -111,7 +111,7 @@
 │  ○ 项目级别（团队协作）                    │
 │     示例：${workspaceFolder}/.prompts       │
 │                                             │
-│  当前路径：[~/.prompt-hub        ] [浏览]  │
+│  当前路径：[~/.otter        ] [浏览]  │
 │                                             │
 │  [上一步]  [下一步]  [跳过此步]            │
 └─────────────────────────────────────────────┘
@@ -124,7 +124,7 @@
 - **实时校验**：路径不存在时提示"将自动创建"；路径不可写时显示错误
 
 **保存逻辑**：
-- 写入 User Settings：`promptHub.storagePath`
+- 写入 User Settings：`otter.storagePath`
 - 如果目录不存在，自动创建并生成空的 `prompts.json`
 
 ---
@@ -134,7 +134,7 @@
 ┌─────────────────────────────────────────────┐
 │  🔄 启用 Git 同步（可选）                   │
 │                                             │
-│  ✓ 已检测到路径 ~/.prompt-hub 不在 Git 仓库│
+│  ✓ 已检测到路径 ~/.otter 不在 Git 仓库│
 │                                             │
 │  是否要启用版本控制和远程备份？             │
 │                                             │
@@ -174,8 +174,8 @@
 **配置保存**：
 ```json
 {
-  "promptHub.git.enableSync": true,
-  "promptHub.git.autoPullOnStartup": true
+  "otter.git.enableSync": true,
+  "otter.git.autoPullOnStartup": true
 }
 ```
 
@@ -208,13 +208,13 @@
 ```json
 // settings.json
 {
-  "promptHub.ai.provider": "openai",
-  "promptHub.ai.model": "gpt-4o",
-  "promptHub.ai.baseUrl": "https://api.openai.com/v1"
+  "otter.ai.provider": "openai",
+  "otter.ai.model": "gpt-4o",
+  "otter.ai.baseUrl": "https://api.openai.com/v1"
 }
 // SecretStorage
 {
-  "promptHub.ai.apiKey": "<user-input>"
+  "otter.ai.apiKey": "<user-input>"
 }
 ```
 
@@ -226,23 +226,23 @@
 │  ✅ 配置完成！                              │
 │                                             │
 │  您的配置：                                 │
-│  • 存储路径：~/.prompt-hub                  │
+│  • 存储路径：~/.otter                  │
 │  • Git 同步：已启用                         │
 │  • AI 辅助：已配置 OpenAI (gpt-4o)          │
 │                                             │
 │  快速开始：                                 │
 │  1. 选中文本 → 右键 → "Create As New Prompt"│
-│  2. 打开命令面板 → "Prompt Hub: New Prompt" │
-│  3. 查看侧边栏的 Prompt Hub 视图            │
+│  2. 打开命令面板 → "Otter: New Prompt" │
+│  3. 查看侧边栏的 Otter 视图            │
 │                                             │
-│  [打开 Prompt Hub]  [查看文档]  [完成]     │
+│  [打开 Otter]  [查看文档]  [完成]     │
 └─────────────────────────────────────────────┘
 ```
 
 **行为**：
-- **打开 Prompt Hub**：激活侧边栏 TreeView
+- **打开 Otter**：激活侧边栏 TreeView
 - **查看文档**：打开插件文档网页
-- **完成**：关闭向导，设置 `promptHub.onboardingCompleted = true`
+- **完成**：关闭向导，设置 `otter.onboardingCompleted = true`
 
 ---
 
@@ -274,7 +274,7 @@ interface OnboardingState {
 }
 
 // 存储在 Memento（工作区级别）
-context.workspaceState.update('promptHub.onboardingState', state);
+context.workspaceState.update('otter.onboardingState', state);
 ```
 
 #### B. UI 实现方式
@@ -285,7 +285,7 @@ context.workspaceState.update('promptHub.onboardingState', state);
 ```typescript
 async function initGitRepo(storagePath: string): Promise<void> {
   await exec('git init', { cwd: storagePath });
-  await exec('git config user.name "Prompt Hub"');
+  await exec('git config user.name "Otter"');
   await exec('git config user.email "noreply@prompthub"');
   // 创建 .gitignore
   // 首次提交
@@ -302,11 +302,11 @@ async function initGitRepo(storagePath: string): Promise<void> {
 
 | 命令 ID | 显示名称 | 说明 |
 |---------|----------|------|
-| `promptHub.startOnboarding` | Prompt Hub: 配置向导 | 启动首次使用引导 |
-| `promptHub.resetOnboarding` | Prompt Hub: 重置配置向导 | 清除完成标记，重新运行 |
-| `promptHub.configureStorage` | Prompt Hub: 配置存储路径 | 直接跳转到步骤 2 |
-| `promptHub.configureGit` | Prompt Hub: 配置 Git 同步 | 直接跳转到步骤 3 |
-| `promptHub.configureAI` | Prompt Hub: 配置 AI Provider | 直接跳转到步骤 4 |
+| `otter.startOnboarding` | Otter: 配置向导 | 启动首次使用引导 |
+| `otter.resetOnboarding` | Otter: 重置配置向导 | 清除完成标记，重新运行 |
+| `otter.configureStorage` | Otter: 配置存储路径 | 直接跳转到步骤 2 |
+| `otter.configureGit` | Otter: 配置 Git 同步 | 直接跳转到步骤 3 |
+| `otter.configureAI` | Otter: 配置 AI Provider | 直接跳转到步骤 4 |
 
 ---
 
@@ -314,12 +314,12 @@ async function initGitRepo(storagePath: string): Promise<void> {
 
 ```typescript
 export async function activate(context: vscode.ExtensionContext) {
-  const onboardingCompleted = context.globalState.get('promptHub.onboardingCompleted', false);
+  const onboardingCompleted = context.globalState.get('otter.onboardingCompleted', false);
 
   if (!onboardingCompleted) {
     // 延迟 1 秒，避免与其他插件冲突
     setTimeout(() => {
-      vscode.commands.executeCommand('promptHub.startOnboarding');
+      vscode.commands.executeCommand('otter.startOnboarding');
     }, 1000);
   }
 
@@ -335,18 +335,18 @@ export async function activate(context: vscode.ExtensionContext) {
 
 | 配置项 | 类型 | 默认值 | 说明 |
 |--------|------|--------|------|
-| `promptHub.storagePath` | string | `~/.prompt-hub` | Prompt 存储根目录，支持绝对路径、~、环境变量、工作区变量 |
-| `promptHub.storage.autoCreate` | boolean | `true` | 目录不存在时是否自动创建 |
-| `promptHub.markdown.mirrorPath` | string | `${storagePath}/markdown` | Markdown 镜像目录（可选） |
-| `promptHub.markdown.enableMirror` | boolean | `false` | 是否启用 Markdown 镜像 |
-| `promptHub.markdown.filenameTemplate` | string | `prompt-{timestamp}.md` | 文件名模板，支持 `{name}`、`{timestamp}`、`{date}`、`{emoji}` 占位符 |
-| `promptHub.markdown.askForFilename` | boolean | `false` | 创建 Markdown Prompt 时是否询问文件名 |
-| `promptHub.selection.autoDetectPromptName` | boolean | `true` | 从选区创建 Prompt 时自动检测 `# prompt:` 标记 |
-| `promptHub.selection.removePromptMarker` | boolean | `true` | 检测到标记后，是否从内容中移除标记行 |
+| `otter.storagePath` | string | `~/.otter` | Prompt 存储根目录，支持绝对路径、~、环境变量、工作区变量 |
+| `otter.storage.autoCreate` | boolean | `true` | 目录不存在时是否自动创建 |
+| `otter.markdown.mirrorPath` | string | `${storagePath}/markdown` | Markdown 镜像目录（可选） |
+| `otter.markdown.enableMirror` | boolean | `false` | 是否启用 Markdown 镜像 |
+| `otter.markdown.filenameTemplate` | string | `prompt-{timestamp}.md` | 文件名模板，支持 `{name}`、`{timestamp}`、`{date}`、`{emoji}` 占位符 |
+| `otter.markdown.askForFilename` | boolean | `false` | 创建 Markdown Prompt 时是否询问文件名 |
+| `otter.selection.autoDetectPromptName` | boolean | `true` | 从选区创建 Prompt 时自动检测 `# prompt:` 标记 |
+| `otter.selection.removePromptMarker` | boolean | `true` | 检测到标记后，是否从内容中移除标记行 |
 
 **路径格式支持**：
 - ✅ 绝对路径：`E:/Projects/my-prompts`
-- ✅ 用户目录：`~/.prompt-hub` 或 `~/Documents/prompts`
+- ✅ 用户目录：`~/.otter` 或 `~/Documents/prompts`
 - ✅ 环境变量：`${USERPROFILE}/OneDrive/prompts`（Windows）、`$HOME/prompts`（Linux/macOS）
 - ✅ 工作区变量：`${workspaceFolder}/.prompts`（项目级别存储）
 - ❌ 网络路径：`\\server\share\prompts`（暂不支持）
@@ -357,12 +357,12 @@ export async function activate(context: vscode.ExtensionContext) {
 
 | 配置项 | 类型 | 默认值 | 说明 |
 |--------|------|--------|------|
-| `promptHub.git.enableSync` | boolean | `false` | 是否启用 Git 同步功能 |
-| `promptHub.git.autoPullOnStartup` | boolean | `false` | VSCode 启动时自动拉取远程更新 |
-| `promptHub.git.commitMessageTemplate` | string | `"chore: sync prompts"` | 提交信息模板，支持 `{datetime}` 占位符 |
-| `promptHub.git.maxExecutionTime` | number | `5000` | Git 命令最大执行时间（毫秒） |
-| `promptHub.git.autoCommitOnSave` | boolean | `false` | 保存 Prompt 时自动提交到本地仓库 |
-| `promptHub.git.showSyncStatus` | boolean | `true` | 是否在状态栏显示同步状态 |
+| `otter.git.enableSync` | boolean | `false` | 是否启用 Git 同步功能 |
+| `otter.git.autoPullOnStartup` | boolean | `false` | VSCode 启动时自动拉取远程更新 |
+| `otter.git.commitMessageTemplate` | string | `"chore: sync prompts"` | 提交信息模板，支持 `{datetime}` 占位符 |
+| `otter.git.maxExecutionTime` | number | `5000` | Git 命令最大执行时间（毫秒） |
+| `otter.git.autoCommitOnSave` | boolean | `false` | 保存 Prompt 时自动提交到本地仓库 |
+| `otter.git.showSyncStatus` | boolean | `true` | 是否在状态栏显示同步状态 |
 
 ---
 
@@ -370,15 +370,15 @@ export async function activate(context: vscode.ExtensionContext) {
 
 | 配置项 | 类型 | 默认值 | 说明 |
 |--------|------|--------|------|
-| `promptHub.ai.provider` | enum | `"openai"` | AI 提供商：`openai`、`azure`、`qwen`、`custom` |
-| `promptHub.ai.model` | string | `"gpt-4o"` | 使用的模型名称 |
-| `promptHub.ai.baseUrl` | string | `"https://api.openai.com/v1"` | API 基础 URL |
-| `promptHub.ai.timeout` | number | `15000` | API 请求超时时间（毫秒） |
-| `promptHub.ai.temperature` | number | `0.7` | 生成温度（0-2） |
-| `promptHub.ai.maxTokens` | number | `500` | 最大 token 数量 |
+| `otter.ai.provider` | enum | `"openai"` | AI 提供商：`openai`、`azure`、`qwen`、`custom` |
+| `otter.ai.model` | string | `"gpt-4o"` | 使用的模型名称 |
+| `otter.ai.baseUrl` | string | `"https://api.openai.com/v1"` | API 基础 URL |
+| `otter.ai.timeout` | number | `15000` | API 请求超时时间（毫秒） |
+| `otter.ai.temperature` | number | `0.7` | 生成温度（0-2） |
+| `otter.ai.maxTokens` | number | `500` | 最大 token 数量 |
 
 **安全存储**（不在 settings.json 中）：
-- `promptHub.ai.apiKey`：存储在 `SecretStorage`
+- `otter.ai.apiKey`：存储在 `SecretStorage`
 
 ---
 
@@ -386,11 +386,11 @@ export async function activate(context: vscode.ExtensionContext) {
 
 | 配置项 | 类型 | 默认值 | 说明 |
 |--------|------|--------|------|
-| `promptHub.ui.showEmojiPicker` | boolean | `true` | 创建 Prompt 时显示 emoji 选择器 |
-| `promptHub.ui.defaultView` | enum | `"tree"` | TreeView 默认视图：`tree`（树形）、`flat`（平铺） |
-| `promptHub.ui.sortBy` | enum | `"recent"` | 排序方式：`recent`（最近使用）、`name`（名称）、`created`（创建时间） |
-| `promptHub.ui.confirmDelete` | boolean | `true` | 删除 Prompt 时是否二次确认 |
-| `promptHub.ui.undoTimeout` | number | `5000` | 撤销操作的超时时间（毫秒） |
+| `otter.ui.showEmojiPicker` | boolean | `true` | 创建 Prompt 时显示 emoji 选择器 |
+| `otter.ui.defaultView` | enum | `"tree"` | TreeView 默认视图：`tree`（树形）、`flat`（平铺） |
+| `otter.ui.sortBy` | enum | `"recent"` | 排序方式：`recent`（最近使用）、`name`（名称）、`created`（创建时间） |
+| `otter.ui.confirmDelete` | boolean | `true` | 删除 Prompt 时是否二次确认 |
+| `otter.ui.undoTimeout` | number | `5000` | 撤销操作的超时时间（毫秒） |
 
 ---
 
@@ -398,11 +398,11 @@ export async function activate(context: vscode.ExtensionContext) {
 
 | 配置项 | 类型 | 默认值 | 说明 |
 |--------|------|--------|------|
-| `promptHub.advanced.enableUsageLog` | boolean | `true` | 是否记录 AI 使用日志 |
-| `promptHub.advanced.logLevel` | enum | `"info"` | 日志级别：`debug`、`info`、`warn`、`error` |
-| `promptHub.advanced.maxPromptSize` | number | `100000` | 单个 Prompt 最大字符数 |
-| `promptHub.advanced.autoBackup` | boolean | `true` | 是否自动备份 prompts.json |
-| `promptHub.advanced.backupInterval` | number | `86400000` | 备份间隔（毫秒，默认 24 小时） |
+| `otter.advanced.enableUsageLog` | boolean | `true` | 是否记录 AI 使用日志 |
+| `otter.advanced.logLevel` | enum | `"info"` | 日志级别：`debug`、`info`、`warn`、`error` |
+| `otter.advanced.maxPromptSize` | number | `100000` | 单个 Prompt 最大字符数 |
+| `otter.advanced.autoBackup` | boolean | `true` | 是否自动备份 prompts.json |
+| `otter.advanced.backupInterval` | number | `86400000` | 备份间隔（毫秒，默认 24 小时） |
 
 ---
 
@@ -422,12 +422,12 @@ export async function activate(context: vscode.ExtensionContext) {
 ```json
 // User Settings（全局）
 {
-  "promptHub.storagePath": "~/global-prompts"
+  "otter.storagePath": "~/global-prompts"
 }
 
 // Workspace Settings（项目 A）
 {
-  "promptHub.storagePath": "${workspaceFolder}/.prompts"
+  "otter.storagePath": "${workspaceFolder}/.prompts"
 }
 ```
 → 在项目 A 中，使用项目级别路径；其他项目使用全局路径
@@ -435,12 +435,12 @@ export async function activate(context: vscode.ExtensionContext) {
 ---
 
 ## 10. GitHub 同步实现要点
-- **存储检测**：启动时检测 `promptHub.storagePath` 是否位于 Git 仓库；若是则在状态栏或命令面板展示“Git 同步”相关入口。
+- **存储检测**：启动时检测 `otter.storagePath` 是否位于 Git 仓库；若是则在状态栏或命令面板展示“Git 同步”相关入口。
 - **命令集合**：提供 pull（拉取远端最新）、commit（带模板的提交对话框）、push（推送到默认远端）以及统一的“同步全部”命令。
 - **状态提示**：同步前执行 `git status`，如存在未暂存或冲突文件需提示；pull/push 过程中通过 VSCode 进度框展示状态。
 - **冲突处理**：pull 失败并检测到冲突时，需要列出受影响的 Prompt 文件或 JSON 条目，引导用户在 Git 中解决后重试。
-- **日志记录**：同步动作写入独立 Output Channel（如 `Prompt Hub Git Sync`），记录命令、耗时、结果、错误信息；可选写入 UsageLog 以追踪历史。
-- **配置项**：新增 `promptHub.git.enableSync`、`promptHub.git.commitMessageTemplate`、`promptHub.git.autoPullOnStartup` 等设置，允许用户定制同步策略。
+- **日志记录**：同步动作写入独立 Output Channel（如 `Otter Git Sync`），记录命令、耗时、结果、错误信息；可选写入 UsageLog 以追踪历史。
+- **配置项**：新增 `otter.git.enableSync`、`otter.git.commitMessageTemplate`、`otter.git.autoPullOnStartup` 等设置，允许用户定制同步策略。
 - **安全与容错**：git 命令需要支持取消与超时；失败时需退回到安全状态，不影响本地 JSON/Markdown 的读写；禁止在日志中打印凭据。
 
 ---
@@ -448,29 +448,29 @@ export async function activate(context: vscode.ExtensionContext) {
 ## 11. 快速打开设置功能（F12）
 
 ### 11.1 功能目标
-为用户提供快捷方式，一键打开 Prompt Hub 插件的配置页面，无需手动在 VSCode 设置中搜索。
+为用户提供快捷方式，一键打开 Otter 插件的配置页面，无需手动在 VSCode 设置中搜索。
 
 ### 11.2 实现方式
 
 #### A. 命令面板入口
 ```typescript
-// 命令 ID: promptHub.openSettings
-vscode.commands.registerCommand('promptHub.openSettings', () => {
-  vscode.commands.executeCommand('workbench.action.openSettings', '@ext:publisher.prompt-hub');
+// 命令 ID: otter.openSettings
+vscode.commands.registerCommand('otter.openSettings', () => {
+  vscode.commands.executeCommand('workbench.action.openSettings', '@ext:publisher.otter');
 });
 ```
 
-**命令显示名称**：`Prompt Hub: 打开设置`
+**命令显示名称**：`Otter: 打开设置`
 
 #### B. TreeView 快捷入口
 
-在活动栏的 Prompt Hub 视图顶部添加设置图标按钮：
+在活动栏的 Otter 视图顶部添加设置图标按钮：
 
 ```typescript
 // TreeView 工具栏按钮
 {
-  "command": "promptHub.openSettings",
-  "when": "view == promptHubView",
+  "command": "otter.openSettings",
+  "when": "view == otterView",
   "group": "navigation",
   "icon": "$(settings-gear)"
 }
@@ -485,9 +485,9 @@ const statusBarItem = vscode.window.createStatusBarItem(
   vscode.StatusBarAlignment.Right,
   100
 );
-statusBarItem.text = "$(warning) Prompt Hub";
+statusBarItem.text = "$(warning) Otter";
 statusBarItem.tooltip = "配置未完成，点击打开设置";
-statusBarItem.command = "promptHub.openSettings";
+statusBarItem.command = "otter.openSettings";
 statusBarItem.show();
 ```
 
@@ -497,8 +497,8 @@ statusBarItem.show();
 
 ```json
 {
-  "command": "promptHub.openSettings",
-  "when": "view == promptHubView",
+  "command": "otter.openSettings",
+  "when": "view == otterView",
   "group": "z_settings"
 }
 ```
@@ -510,23 +510,23 @@ statusBarItem.show();
 ```json
 // package.json - contributes.configuration
 {
-  "title": "Prompt Hub",
+  "title": "Otter",
   "properties": {
     // === 存储配置 ===
-    "promptHub.storagePath": { ... },
-    "promptHub.storage.autoCreate": { ... },
+    "otter.storagePath": { ... },
+    "otter.storage.autoCreate": { ... },
 
     // === Git 同步 ===
-    "promptHub.git.enableSync": { ... },
-    "promptHub.git.autoPullOnStartup": { ... },
+    "otter.git.enableSync": { ... },
+    "otter.git.autoPullOnStartup": { ... },
 
     // === AI 配置 ===
-    "promptHub.ai.provider": { ... },
-    "promptHub.ai.model": { ... },
+    "otter.ai.provider": { ... },
+    "otter.ai.model": { ... },
 
     // === UI 设置 ===
-    "promptHub.ui.showEmojiPicker": { ... },
-    "promptHub.ui.sortBy": { ... }
+    "otter.ui.showEmojiPicker": { ... },
+    "otter.ui.sortBy": { ... }
   }
 }
 ```
@@ -656,8 +656,8 @@ function extractEmojiAndName(text: string): { emoji?: string; name: string } {
 
 #### B. 集成到创建流程
 ```typescript
-// 命令 ID: promptHub.createFromSelection
-vscode.commands.registerCommand('promptHub.createFromSelection', async () => {
+// 命令 ID: otter.createFromSelection
+vscode.commands.registerCommand('otter.createFromSelection', async () => {
   const editor = vscode.window.activeTextEditor;
   if (!editor) return;
 
@@ -728,12 +728,12 @@ if (parsed.name) {
 #### B. 配置项
 ```json
 {
-  "promptHub.selection.autoDetectPromptName": {
+  "otter.selection.autoDetectPromptName": {
     "type": "boolean",
     "default": true,
     "description": "从选区创建 Prompt 时自动检测 `# prompt:` 标记"
   },
-  "promptHub.selection.removePromptMarker": {
+  "otter.selection.removePromptMarker": {
     "type": "boolean",
     "default": true,
     "description": "检测到标记后，是否从内容中移除标记行"
@@ -744,7 +744,7 @@ if (parsed.name) {
 #### C. 降级策略
 ```typescript
 // 如果用户禁用了自动检测
-const autoDetect = vscode.workspace.getConfiguration('promptHub.selection')
+const autoDetect = vscode.workspace.getConfiguration('otter.selection')
   .get('autoDetectPromptName', true);
 
 if (!autoDetect) {
@@ -849,12 +849,12 @@ function sanitizeFilename(name: string): string {
 
 ```json
 {
-  "promptHub.markdown.filenameTemplate": {
+  "otter.markdown.filenameTemplate": {
     "type": "string",
     "default": "prompt-{timestamp}.md",
     "description": "Markdown 文件名模板，支持占位符：{name}（Prompt名称）、{timestamp}（时间戳）、{date}（日期YYYY-MM-DD）、{emoji}（emoji字符）"
   },
-  "promptHub.markdown.askForFilename": {
+  "otter.markdown.askForFilename": {
     "type": "boolean",
     "default": false,
     "description": "创建 Markdown Prompt 时是否询问文件名"
@@ -900,57 +900,57 @@ function generateFilename(prompt: Prompt, template: string): string {
 
 | 命令 ID | 显示名称 | 功能 | 快捷键建议 |
 |---------|----------|------|-----------|
-| `promptHub.createFromSelection` | Prompt Hub: 从选区创建 | 将编辑器选中内容创建为新 Prompt | 无 |
-| `promptHub.newPromptFile` | Prompt Hub: 新建 Prompt 文件 | 创建空白 Markdown Prompt 文件 | 无 |
-| `promptHub.searchPrompt` | Prompt Hub: 搜索 Prompt | 打开搜索面板，模糊匹配查找 | `Ctrl+Shift+P` |
-| `promptHub.copyPrompt` | Prompt Hub: 复制 Prompt | 复制 Prompt 内容到剪贴板 | 无 |
-| `promptHub.editPrompt` | Prompt Hub: 编辑 Prompt | 打开 Prompt 编辑界面 | 无 |
-| `promptHub.deletePrompt` | Prompt Hub: 删除 Prompt | 删除选中的 Prompt（需确认） | 无 |
+| `otter.createFromSelection` | Otter: 从选区创建 | 将编辑器选中内容创建为新 Prompt | 无 |
+| `otter.newPromptFile` | Otter: 新建 Prompt 文件 | 创建空白 Markdown Prompt 文件 | 无 |
+| `otter.searchPrompt` | Otter: 搜索 Prompt | 打开搜索面板，模糊匹配查找 | `Ctrl+Shift+P` |
+| `otter.copyPrompt` | Otter: 复制 Prompt | 复制 Prompt 内容到剪贴板 | 无 |
+| `otter.editPrompt` | Otter: 编辑 Prompt | 打开 Prompt 编辑界面 | 无 |
+| `otter.deletePrompt` | Otter: 删除 Prompt | 删除选中的 Prompt（需确认） | 无 |
 
 ### 14.2 配置与管理命令
 
 | 命令 ID | 显示名称 | 功能 |
 |---------|----------|------|
-| `promptHub.openSettings` | Prompt Hub: 打开设置 | 快速打开插件配置页面 |
-| `promptHub.startOnboarding` | Prompt Hub: 配置向导 | 启动首次使用引导 |
-| `promptHub.resetOnboarding` | Prompt Hub: 重置配置向导 | 清除完成标记，重新运行向导 |
-| `promptHub.configureStorage` | Prompt Hub: 配置存储路径 | 直接跳转到存储路径配置 |
-| `promptHub.configureGit` | Prompt Hub: 配置 Git 同步 | 直接跳转到 Git 配置 |
-| `promptHub.configureAI` | Prompt Hub: 配置 AI Provider | 直接跳转到 AI 配置 |
+| `otter.openSettings` | Otter: 打开设置 | 快速打开插件配置页面 |
+| `otter.startOnboarding` | Otter: 配置向导 | 启动首次使用引导 |
+| `otter.resetOnboarding` | Otter: 重置配置向导 | 清除完成标记，重新运行向导 |
+| `otter.configureStorage` | Otter: 配置存储路径 | 直接跳转到存储路径配置 |
+| `otter.configureGit` | Otter: 配置 Git 同步 | 直接跳转到 Git 配置 |
+| `otter.configureAI` | Otter: 配置 AI Provider | 直接跳转到 AI 配置 |
 
 ### 14.3 Git 同步命令
 
 | 命令 ID | 显示名称 | 功能 |
 |---------|----------|------|
-| `promptHub.git.pull` | Prompt Hub: Git Pull | 拉取远��仓库最新 Prompt |
-| `promptHub.git.commit` | Prompt Hub: Git Commit | 提交本地 Prompt 更改 |
-| `promptHub.git.push` | Prompt Hub: Git Push | 推送到远程仓库 |
-| `promptHub.git.syncAll` | Prompt Hub: Git 同步全部 | 执行 pull → commit → push |
-| `promptHub.git.status` | Prompt Hub: Git 状态 | 查看 Git 仓库状态 |
+| `otter.git.pull` | Otter: Git Pull | 拉取远��仓库最新 Prompt |
+| `otter.git.commit` | Otter: Git Commit | 提交本地 Prompt 更改 |
+| `otter.git.push` | Otter: Git Push | 推送到远程仓库 |
+| `otter.git.syncAll` | Otter: Git 同步全部 | 执行 pull → commit → push |
+| `otter.git.status` | Otter: Git 状态 | 查看 Git 仓库状态 |
 
 ### 14.4 导入导出命令
 
 | 命令 ID | 显示名称 | 功能 |
 |---------|----------|------|
-| `promptHub.importJSON` | Prompt Hub: 导入 JSON | 从 JSON 文件导入 Prompt |
-| `promptHub.exportJSON` | Prompt Hub: 导出 JSON | 导出 Prompt 为 JSON 文件 |
-| `promptHub.exportToMarkdown` | Prompt Hub: 导出为 Markdown | 将 Prompt 导出为 Markdown 文件 |
+| `otter.importJSON` | Otter: 导入 JSON | 从 JSON 文件导入 Prompt |
+| `otter.exportJSON` | Otter: 导出 JSON | 导出 Prompt 为 JSON 文件 |
+| `otter.exportToMarkdown` | Otter: 导出为 Markdown | 将 Prompt 导出为 Markdown 文件 |
 
 ### 14.5 AI 辅助命令
 
 | 命令 ID | 显示名称 | 功能 |
 |---------|----------|------|
-| `promptHub.ai.generateTitle` | Prompt Hub: AI 生成标题 | 为当前 Prompt 生成标题 |
-| `promptHub.ai.generateEmoji` | Prompt Hub: AI 推荐 Emoji | 为当前 Prompt 推荐合适的 emoji |
-| `promptHub.ai.optimizeContent` | Prompt Hub: AI 优化内容 | 优化 Prompt 内容 |
-| `promptHub.ai.viewUsage` | Prompt Hub: 查看 AI 使用记录 | 打开 AI 调用统计和费用记录 |
+| `otter.ai.generateTitle` | Otter: AI 生成标题 | 为当前 Prompt 生成标题 |
+| `otter.ai.generateEmoji` | Otter: AI 推荐 Emoji | 为当前 Prompt 推荐合适的 emoji |
+| `otter.ai.optimizeContent` | Otter: AI 优化内容 | 优化 Prompt 内容 |
+| `otter.ai.viewUsage` | Otter: 查看 AI 使用记录 | 打开 AI 调用统计和费用记录 |
 
 ### 14.6 其他功能命令
 
 | 命令 ID | 显示名称 | 功能 |
 |---------|----------|------|
-| `promptHub.viewLogs` | Prompt Hub: 查看日志 | 打开 Output Channel 查看日志 |
-| `promptHub.clearCache` | Prompt Hub: 清除缓存 | 清除插件缓存数据 |
-| `promptHub.refreshView` | Prompt Hub: 刷新视图 | 重新加载 TreeView 数据 |
+| `otter.viewLogs` | Otter: 查看日志 | 打开 Output Channel 查看日志 |
+| `otter.clearCache` | Otter: 清除缓存 | 清除插件缓存数据 |
+| `otter.refreshView` | Otter: 刷新视图 | 重新加载 TreeView 数据 |
 
 ---

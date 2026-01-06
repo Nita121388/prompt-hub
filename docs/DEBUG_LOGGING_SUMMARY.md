@@ -2,7 +2,7 @@
 
 ## 🎯 目的
 
-为 Prompt Hub 的本地 AI 集成功能（LocalClaudeProvider 和 LocalCodexProvider）添加全面的调试日志，帮助开发者和用户排查本地 CLI 调用问题。
+为 Otter 的本地 AI 集成功能（LocalClaudeProvider 和 LocalCodexProvider）添加全面的调试日志，帮助开发者和用户排查本地 CLI 调用问题。
 
 ## ✅ 完成的工作
 
@@ -237,14 +237,14 @@
 ### 方式二：输出面板
 
 1. 按 `Ctrl+Shift+U` / `Cmd+Shift+U` 打开输出面板
-2. 下拉选择 `Prompt Hub`（如果插件配置了 OutputChannel）
+2. 下拉选择 `Otter`（如果插件配置了 OutputChannel）
 
 ### 方式三：启用调试模式
 
 在 VSCode 设置中添加：
 ```json
 {
-  "promptHub.debug": true
+  "otter.debug": true
 }
 ```
 
@@ -267,7 +267,7 @@
 ```
 
 **解决方法：**
-1. 手动配置 `promptHub.local.codexPath`
+1. 手动配置 `otter.local.codexPath`
 2. 或设置环境变量 `CODEX_BIN`
 3. 或确保 Codex 在 PATH 中（`where codex` 或 `which codex` 可找到）
 
@@ -284,7 +284,7 @@
 ```
 
 **解决方法：**
-1. 增加超时配置：`promptHub.local.claudeTimeoutMs`（默认 120000）
+1. 增加超时配置：`otter.local.claudeTimeoutMs`（默认 120000）
 2. 检查网络连接（首次可能需要登录认证）
 3. 在终端手动运行 `claude -p "你好"` 完成初次登录
 
@@ -303,7 +303,7 @@
 
 **解决方法：**
 1. 检查 CLI 版本是否最新
-2. 尝试更换模型（`promptHub.local.codexModel`）
+2. 尝试更换模型（`otter.local.codexModel`）
 3. 查看完整 stdout 内容排查
 
 ## 📈 日志统计
@@ -335,7 +335,7 @@
 
 ## 🎉 总结
 
-本次为 Prompt Hub 本地 AI 集成的两个核心 Provider 添加了超过 120 个调试日志点，涵盖：
+本次为 Otter 本地 AI 集成的两个核心 Provider 添加了超过 120 个调试日志点，涵盖：
 
 ✅ **执行流程跟踪**：每个关键步骤的开始/完成
 ✅ **性能监控**：执行耗时（毫秒）、内容长度（字节）

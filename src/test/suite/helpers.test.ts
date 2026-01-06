@@ -25,7 +25,8 @@ suite('Helpers Test Suite', () => {
     test('should replace illegal characters', () => {
       const result = sanitizeFilename('test<>:"/\\|?*file');
       assert.ok(!result.match(/[<>:"/\\|?*]/), 'Should not contain illegal characters');
-      assert.strictEqual(result, 'test----------file');
+      // 非法字符集合：[<>:"/\\|?*] 共 9 个字符，逐个替换为 '-' 后应得到 9 个 '-'
+      assert.strictEqual(result, 'test---------file');
     });
 
     test('should replace spaces with dashes', () => {

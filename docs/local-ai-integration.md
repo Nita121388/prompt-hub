@@ -2,33 +2,33 @@
 
 ## 概述
 
-Prompt Hub 现已支持调用本地安装的 **Claude Code** 和 **Codex**，您可以无需配置 API Key 即可使用强大的 AI 功能。
+Otter 现已支持调用本地安装的 **Claude Code** 和 **Codex**，您可以无需配置 API Key 即可使用强大的 AI 功能。
 
 ## 支持的本地 AI 工具
 
 ### 1. Claude Code CLI（推荐）
 - **优点**：功能强大，模型新颖（Claude Sonnet 4.5）
 - **安装位置**：通常在 `~/.claude` 或 `C:\Users\<username>\.claude`
-- **自动检测**：Prompt Hub 会自动检测常见安装路径
+- **自动检测**：Otter 会自动检测常见安装路径
 - **无需 API Key**：直接使用本地 Claude Code 的认证
 
 ### 2. Codex
 - **优点**：专为代码任务优化
 - **安装位置**：通常在 `~/.codex` 或 `C:\Users\<username>\.codex`
-- **自动检测**：Prompt Hub 会自动检测常见安装路径
+- **自动检测**：Otter 会自动检测常见安装路径
 - **无需 API Key**：直接使用本地 Codex 的认证
 
 ## 快速开始
 
 ### 方式一：使用配置向导（推荐）
 
-1. **首次打开 Prompt Hub 时**
+1. **首次打开 Otter 时**
    - 会自动弹出配置向导
    - 在 AI 提供商步骤中，选择「💻 本地 Claude Code（推荐）」或「⚡ 本地 Codex」
 
 2. **或手动启动向导**
    ```
-   Ctrl+Shift+P → Prompt Hub: 配置向导
+   Ctrl+Shift+P → Otter: 配置向导
    ```
 
 3. **工具会自动检测**
@@ -37,11 +37,11 @@ Prompt Hub 现已支持调用本地安装的 **Claude Code** 和 **Codex**，您
 
 ### 方式二：手动配置
 
-打开 VSCode 设置（`Ctrl+,`），搜索 `promptHub.ai.provider`，选择相应的选项：
+打开 VSCode 设置（`Ctrl+,`），搜索 `otter.ai.provider`，选择相应的选项：
 
 ```json
 {
-  "promptHub.ai.provider": "local-claude"
+  "otter.ai.provider": "local-claude"
 }
 ```
 
@@ -49,7 +49,7 @@ Prompt Hub 现已支持调用本地安装的 **Claude Code** 和 **Codex**，您
 
 ```json
 {
-  "promptHub.ai.provider": "local-codex"
+  "otter.ai.provider": "local-codex"
 }
 ```
 
@@ -59,16 +59,16 @@ Prompt Hub 现已支持调用本地安装的 **Claude Code** 和 **Codex**，您
 
 | 配置项 | 说明 | 默认值 |
 |--------|------|--------|
-| `promptHub.ai.provider` | AI 提供商 | （未配置） |
-| `promptHub.ai.model` | 模型名称 | `claude-sonnet-4.5` |
+| `otter.ai.provider` | AI 提供商 | （未配置） |
+| `otter.ai.model` | 模型名称 | `claude-sonnet-4.5` |
 
 ### 本地 AI 专用配置
 
 | 配置项 | 说明 | 默认值 |
 |--------|------|--------|
-| `promptHub.local.claudePath` | Claude Code CLI 路径（留空自动检测） | （空） |
-| `promptHub.local.codexPath` | Codex 可执行文件路径（留空自动检测） | （空） |
-| `promptHub.local.codexModel` | Codex 使用的模型名称 | `claude-sonnet-4.5` |
+| `otter.local.claudePath` | Claude Code CLI 路径（留空自动检测） | （空） |
+| `otter.local.codexPath` | Codex 可执行文件路径（留空自动检测） | （空） |
+| `otter.local.codexModel` | Codex 使用的模型名称 | `claude-sonnet-4.5` |
 
 ## 自动检测路径
 
@@ -107,8 +107,8 @@ Prompt Hub 现已支持调用本地安装的 **Claude Code** 和 **Codex**，您
 
 ```json
 {
-  "promptHub.local.claudePath": "C:\\Users\\break\\.claude\\claude.exe",
-  "promptHub.local.codexPath": "C:\\Users\\break\\.codex\\codex.exe"
+  "otter.local.claudePath": "C:\\Users\\break\\.claude\\claude.exe",
+  "otter.local.codexPath": "C:\\Users\\break\\.codex\\codex.exe"
 }
 ```
 
@@ -124,7 +124,7 @@ Prompt Hub 现已支持调用本地安装的 **Claude Code** 和 **Codex**，您
 
 1. 创建新 Prompt 时
 2. 点击「AI 生成标题」按钮
-3. Prompt Hub 会调用本地 Claude Code 或 Codex 生成标题和 emoji
+3. Otter 会调用本地 Claude Code 或 Codex 生成标题和 emoji
 
 ### 优化 Prompt 内容
 
@@ -148,7 +148,7 @@ Prompt Hub 现已支持调用本地安装的 **Claude Code** 和 **Codex**，您
 
 **解决方案**：
 1. 确认已安装 Claude Code
-2. 手动配置路径：`promptHub.local.claudePath`
+2. 手动配置路径：`otter.local.claudePath`
 3. 使用完整路径，例如：`C:\Users\break\.claude\claude.exe`
 
 ### 问题 2：错误 "未找到 Codex CLI"
@@ -159,7 +159,7 @@ Prompt Hub 现已支持调用本地安装的 **Claude Code** 和 **Codex**，您
 
 **解决方案**：
 1. 确认已安装 Codex
-2. 手动配置路径：`promptHub.local.codexPath`
+2. 手动配置路径：`otter.local.codexPath`
 3. 使用完整路径，例如：`C:\Users\break\.codex\codex.exe`
 
 ### 问题 3：调用超时
@@ -182,7 +182,7 @@ Prompt Hub 现已支持调用本地安装的 **Claude Code** 和 **Codex**，您
 **解决方案**：
 1. 简化输入内容
 2. 升级本地工具到最新版本
-3. 调整模型设置：`promptHub.local.codexModel`
+3. 调整模型设置：`otter.local.codexModel`
 
 ## 性能提示
 
@@ -212,15 +212,15 @@ Prompt Hub 现已支持调用本地安装的 **Claude Code** 和 **Codex**，您
 
 | 命令 | 说明 |
 |------|------|
-| `Prompt Hub: 配置向导` | 启动配置向导 |
-| `Prompt Hub: 打开设置` | 快速打开插件设置 |
-| `Prompt Hub: AI 生成标题` | 为当前 Prompt 生成标题 |
-| `Prompt Hub: AI 优化内容` | 优化当前 Prompt 内容 |
+| `Otter: 配置向导` | 启动配置向导 |
+| `Otter: 打开设置` | 快速打开插件设置 |
+| `Otter: AI 生成标题` | 为当前 Prompt 生成标题 |
+| `Otter: AI 优化内容` | 优化当前 Prompt 内容 |
 
 ## 更多帮助
 
 - **VSCode 命令面板**：`Ctrl+Shift+P` 搜索相关命令
-- **插件设置**：`Ctrl+,` 搜索 `promptHub`
+- **插件设置**：`Ctrl+,` 搜索 `otter`
 - **问题反馈**：在 GitHub Issues 中提交反馈
 
 ---

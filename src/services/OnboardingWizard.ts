@@ -26,10 +26,10 @@ export class OnboardingWizard {
     private readonly context: vscode.ExtensionContext,
     private readonly configService: ConfigurationService
   ) {
-    const configStoragePath = this.configService.get<string>('storagePath', '~/.prompt-hub');
-    const savedState = this.context.workspaceState.get<OnboardingState>(
-      'promptHub.onboardingState'
-    );
+    const configStoragePath = this.configService.get<string>('storagePath', '~/.otter');
+    const savedState =
+      this.context.workspaceState.get<OnboardingState>('otter.onboardingState') ??
+      this.context.workspaceState.get<OnboardingState>('promptHub.onboardingState');
 
     const defaults: OnboardingState = {
       step: 1,
@@ -68,7 +68,7 @@ export class OnboardingWizard {
   /** 重置引导状态，供命令调用 */
   async reset(): Promise<void> {
     console.log(LOG_PREFIX, 'reset() 调用，重置引导状态');
-    const configStoragePath = this.configService.get<string>('storagePath', '~/.prompt-hub');
+    const configStoragePath = this.configService.get<string>('storagePath', '~/.otter');
     this.state = {
       step: 1,
       storagePath: configStoragePath,
@@ -79,8 +79,9 @@ export class OnboardingWizard {
       completed: false,
     };
     await this.saveState();
+    await this.context.globalState.update('otter.onboardingCompleted', false);
     await this.context.globalState.update('promptHub.onboardingCompleted', false);
-    vscode.window.showInformationMessage('已重置 Prompt Hub 配置向导，下次会重新显示。');
+    vscode.window.showInformationMessage('已重置 Otter 配置向导，下次会重新显示。');
   }
 
   /** 旧版欢迎页（保留以便后续需要时使用） */
@@ -88,7 +89,7 @@ export class OnboardingWizard {
     console.log(LOG_PREFIX, 'showWelcome() 调用');
 
     const message = [
-      '欢迎使用 Prompt Hub 👋',
+      '欢迎使用 Otter 👋',
       '',
       '我们将通过一个简短的向导帮你完成初始配置：',
       '  · 选择 Prompt 存储路径',
@@ -124,7 +125,7 @@ export class OnboardingWizard {
     console.log(LOG_PREFIX, 'showWelcomeV2() 调用');
 
     const message = [
-      '欢迎使用 Prompt Hub 👋',
+      '欢迎使用 Otter 👋',
       '',
       '我们将通过一个简短的向导帮你完成初始配置：',
       '  · 选择 Prompt 存储路径',
@@ -164,7 +165,7 @@ export class OnboardingWizard {
       let finished = false;
 
       // 当前存储路径（如果之前配置过就复用）
-      let storagePath = this.state.storagePath || '~/.prompt-hub';
+      let storagePath = this.state.storagePath || '~/.otter';
       console.log(LOG_PREFIX, 'runFlow() 初始存储路径:', storagePath);
 
       while (!finished) {
@@ -207,7 +208,7 @@ export class OnboardingWizard {
           }
 
           // 将 Git 启用状态同步到配置，方便 GitSyncService 使用
-          await vscode.workspace.getConfiguration('promptHub').update(
+          await vscode.workspace.getConfiguration('otter').update(
             'git.enableSync',
             this.state.gitEnabled,
             vscode.ConfigurationTarget.Global
@@ -215,7 +216,7 @@ export class OnboardingWizard {
 
           // 记录远程 URL，便于新设备一键“拉取/导入”
           if (this.state.gitRemoteUrl && this.state.gitRemoteUrl.trim()) {
-            await vscode.workspace.getConfiguration('promptHub').update(
+            await vscode.workspace.getConfiguration('otter').update(
               'git.remoteUrl',
               this.state.gitRemoteUrl.trim(),
               vscode.ConfigurationTarget.Global
@@ -295,7 +296,7 @@ export class OnboardingWizard {
   private async configureStorage(
     previousPath: string
   ): Promise<{ type: 'next'; storagePath: string } | { type: 'cancel' }> {
-    const resolvedPrevious = this.resolvePath(previousPath || '~/.prompt-hub');
+    const resolvedPrevious = this.resolvePath(previousPath || '~/.otter');
     console.log(
       LOG_PREFIX,
       'configureStorage() 调用，previousPath =',
@@ -309,8 +310,8 @@ export class OnboardingWizard {
     const baseScenarios: ScenarioItem[] = [
       {
         label: '$(home) 本地存储（推荐）',
-        description: '存储在用户目录下，路径 ~/.prompt-hub',
-        path: '~/.prompt-hub',
+        description: '存储在用户目录下，路径 ~/.otter',
+        path: '~/.otter',
       },
       {
         label: '$(cloud) 云盘同步',
@@ -365,12 +366,12 @@ export class OnboardingWizard {
 
     // 保持当前路径：不修改设置，只保证目录存在
     if (selected.path === 'keep') {
-      const resolved = this.resolvePath(previousPath || '~/.prompt-hub');
+      const resolved = this.resolvePath(previousPath || '~/.otter');
       if (!fs.existsSync(resolved)) {
         fs.mkdirSync(resolved, { recursive: true });
         vscode.window.showInformationMessage(`已创建存储目录：${resolved}`);
       }
-      return { type: 'next', storagePath: previousPath || '~/.prompt-hub' };
+      return { type: 'next', storagePath: previousPath || '~/.otter' };
     }
 
     let storagePath: string;
@@ -428,7 +429,7 @@ export class OnboardingWizard {
     }
 
     // 写入 VSCode 配置（全局）
-    await vscode.workspace.getConfiguration('promptHub').update(
+    await vscode.workspace.getConfiguration('otter').update(
       'storagePath',
       storagePath,
       vscode.ConfigurationTarget.Global
@@ -1020,7 +1021,7 @@ export class OnboardingWizard {
       );
 
       // 写入 VSCode 配置
-      const aiConfig = vscode.workspace.getConfiguration('promptHub.ai');
+      const aiConfig = vscode.workspace.getConfiguration('otter.ai');
       await aiConfig.update('provider', selected.id, vscode.ConfigurationTarget.Global);
       await aiConfig.update('model', selected.defaultModel, vscode.ConfigurationTarget.Global);
 
@@ -1097,16 +1098,16 @@ export class OnboardingWizard {
     }
 
     // 写入 VSCode 配置
-    const aiConfig = vscode.workspace.getConfiguration('promptHub.ai');
+    const aiConfig = vscode.workspace.getConfiguration('otter.ai');
     await aiConfig.update('provider', selected.id, vscode.ConfigurationTarget.Global);
     await aiConfig.update('model', model, vscode.ConfigurationTarget.Global);
     await aiConfig.update('baseUrl', baseUrl, vscode.ConfigurationTarget.Global);
 
     // 将 API Key 存入 SecretStorage
     // 新格式：按 provider 分桶，支持后续切换提供商时各自维护 Key
-    await this.context.secrets.store(`promptHub.ai.apiKey.${selected.id}`, apiKey);
-    // 兼容旧格式：历史版本使用 promptHub.ai.apiKey（AIService 会自动迁移到新格式）
-    await this.context.secrets.store('promptHub.ai.apiKey', apiKey);
+    await this.context.secrets.store(`otter.ai.apiKey.${selected.id}`, apiKey);
+    // 兼容旧格式：历史版本使用 otter.ai.apiKey（AIService 会自动迁移到新格式）
+    await this.context.secrets.store('otter.ai.apiKey', apiKey);
 
     return {
       type: 'next',
@@ -1274,7 +1275,7 @@ export class OnboardingWizard {
   // ========== 步骤 6：完成页 ==========
 
   private async showCompletion(): Promise<void> {
-    const resolvedStoragePath = this.resolvePath(this.state.storagePath || '~/.prompt-hub');
+    const resolvedStoragePath = this.resolvePath(this.state.storagePath || '~/.otter');
     const summaryLines = [
       '配置向导完成 🎉',
       '',
@@ -1286,20 +1287,21 @@ export class OnboardingWizard {
       }`,
       '',
       '接下来可以这样开始使用：',
-      '  1. 选中文本 → 右键 →「Prompt Hub: 从选区创建」',
-      '  2. 执行「Prompt Hub: 新建 Prompt 文件」使用模板开始编写',
-      '  3. 在活动栏中打开 Prompt Hub 视图查看和管理 Prompt',
+      '  1. 选中文本 → 右键 →「Otter: 从选区创建」',
+      '  2. 执行「Otter: 新建 Prompt 文件」使用模板开始编写',
+      '  3. 在活动栏中打开 Otter 视图查看和管理 Prompt',
     ];
 
     console.log(LOG_PREFIX, 'showCompletion() 显示配置摘要');
 
     // 自动标记为已完成，配置已在每个步骤中保存，用户无需手动确认
     this.state.completed = true;
+    await this.context.globalState.update('otter.onboardingCompleted', true);
     await this.context.globalState.update('promptHub.onboardingCompleted', true);
     await this.saveState();
     console.log(LOG_PREFIX, '向导已自动标记为完成');
 
-    const openHubItem: vscode.MessageItem = { title: '打开 Prompt Hub' };
+    const openHubItem: vscode.MessageItem = { title: '打开 Otter' };
     const openDocsItem: vscode.MessageItem = { title: '查看使用文档' };
     // VS Code 的 modal 信息框会默认提供一个“取消”作为关闭入口，这里用 isCloseAffordance 改成更贴切的“关闭”
     const closeItem: vscode.MessageItem = { title: '关闭', isCloseAffordance: true };
@@ -1315,10 +1317,10 @@ export class OnboardingWizard {
     console.log(LOG_PREFIX, 'showCompletion() 用户选择:', result?.title);
 
     if (result === openHubItem) {
-      await vscode.commands.executeCommand('promptHubView.focus');
+      await vscode.commands.executeCommand('otterView.focus');
     } else if (result === openDocsItem) {
       const docsUrl =
-        'https://github.com/Nita121388/prompt-hub/blob/main/docs/user-guide.md';
+        'https://github.com/Nita121388/otter/blob/main/docs/user-guide.md';
       await vscode.env.openExternal(vscode.Uri.parse(docsUrl));
     }
   }
@@ -1327,10 +1329,10 @@ export class OnboardingWizard {
 
   /** 直接使用默认存储路径，跳过 Git 和 AI */
   private async useDefaults(): Promise<void> {
-    const defaultPath = '~/.prompt-hub';
+    const defaultPath = '~/.otter';
     console.log(LOG_PREFIX, 'useDefaults() 使用默认路径:', defaultPath);
 
-    await vscode.workspace.getConfiguration('promptHub').update(
+    await vscode.workspace.getConfiguration('otter').update(
       'storagePath',
       defaultPath,
       vscode.ConfigurationTarget.Global
@@ -1351,10 +1353,11 @@ export class OnboardingWizard {
       completed: true,
     };
     await this.saveState();
+    await this.context.globalState.update('otter.onboardingCompleted', true);
     await this.context.globalState.update('promptHub.onboardingCompleted', true);
 
     vscode.window.showInformationMessage(
-      '已使用默认配置。\n\n存储路径：~/.prompt-hub\n如需修改，可在设置中搜索 "Prompt Hub"。'
+      '已使用默认配置。\n\n存储路径：~/.otter\n如需修改，可在设置中搜索 "Otter"。'
     );
   }
 
@@ -1363,6 +1366,7 @@ export class OnboardingWizard {
   /** 保存引导状态到 workspaceState */
   private async saveState(): Promise<void> {
     console.log(LOG_PREFIX, '保存状态', this.state);
+    await this.context.workspaceState.update('otter.onboardingState', this.state);
     await this.context.workspaceState.update('promptHub.onboardingState', this.state);
   }
 
@@ -1427,11 +1431,11 @@ export class OnboardingWizard {
 
   private async refreshPromptViewAfterGit(): Promise<void> {
     try {
-      await vscode.commands.executeCommand('promptHub.refreshView');
+      await vscode.commands.executeCommand('otter.refreshView');
     } catch (error) {
       console.warn(
         LOG_PREFIX,
-        'refreshPromptViewAfterGit() 调用 promptHub.refreshView 失败（可忽略）:',
+        'refreshPromptViewAfterGit() 调用 otter.refreshView 失败（可忽略）:',
         error
       );
     }

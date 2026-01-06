@@ -36,7 +36,7 @@ suite('CommandRegistrar Test Suite', () => {
     mockStorage = {} as any;
     mockTreeProvider = {} as any;
     // Set default storage path for testing
-    mockConfig.set('storagePath', '~/.prompt-hub');
+    mockConfig.set('storagePath', '~/.otter');
   });
 
   suite('Path Resolution Tests', () => {
@@ -46,7 +46,7 @@ suite('CommandRegistrar Test Suite', () => {
 
       // Since resolvePath is private, we'll test it through the behavior
       // of openStorageFolder which uses it
-      const resolved = testPath.replace('~', os.homedir());
+      const resolved = path.normalize(testPath.replace('~', os.homedir()));
 
       assert.strictEqual(
         resolved,
@@ -67,7 +67,7 @@ suite('CommandRegistrar Test Suite', () => {
       if (testPath.includes('${workspaceFolder}')) {
         const workspaceFolder = originalWorkspaceFolders?.[0]?.uri.fsPath;
         if (workspaceFolder) {
-          resolved = testPath.replace('${workspaceFolder}', workspaceFolder);
+          resolved = path.normalize(testPath.replace('${workspaceFolder}', workspaceFolder));
         }
       }
 
@@ -107,9 +107,9 @@ suite('CommandRegistrar Test Suite', () => {
     });
 
     test('should handle complex paths with ~ and subdirectories', () => {
-      const testPath = '~/.config/prompt-hub/storage';
-      const resolved = testPath.replace('~', os.homedir());
-      const expected = path.join(os.homedir(), '.config', 'prompt-hub', 'storage');
+      const testPath = '~/.config/otter/storage';
+      const resolved = path.normalize(testPath.replace('~', os.homedir()));
+      const expected = path.join(os.homedir(), '.config', 'otter', 'storage');
 
       assert.strictEqual(
         resolved,
@@ -121,9 +121,9 @@ suite('CommandRegistrar Test Suite', () => {
 
   suite('Storage Folder Operations', () => {
     test('should use storage path directly as directory', () => {
-      const storagePath = '~/.prompt-hub';
-      const resolved = storagePath.replace('~', os.homedir());
-      const expectedDir = path.join(os.homedir(), '.prompt-hub');
+      const storagePath = '~/.otter';
+      const resolved = path.normalize(storagePath.replace('~', os.homedir()));
+      const expectedDir = path.join(os.homedir(), '.otter');
 
       assert.strictEqual(
         resolved,
@@ -135,12 +135,12 @@ suite('CommandRegistrar Test Suite', () => {
     test('should handle different storage path formats', () => {
       const testCases = [
         {
-          input: '~/.prompt-hub',
-          expected: path.join(os.homedir(), '.prompt-hub')
+          input: '~/.otter',
+          expected: path.join(os.homedir(), '.otter')
         },
         {
-          input: '~/.config/prompt-hub',
-          expected: path.join(os.homedir(), '.config', 'prompt-hub')
+          input: '~/.config/otter',
+          expected: path.join(os.homedir(), '.config', 'otter')
         },
         {
           input: '~/Documents/Prompts',
@@ -149,7 +149,7 @@ suite('CommandRegistrar Test Suite', () => {
       ];
 
       testCases.forEach(({ input, expected }) => {
-        const resolved = input.replace('~', os.homedir());
+        const resolved = path.normalize(input.replace('~', os.homedir()));
 
         assert.strictEqual(
           resolved,
@@ -166,17 +166,17 @@ suite('CommandRegistrar Test Suite', () => {
       // In actual implementation, this would check the menu contributions
 
       const expectedMenuItems = [
-        'promptHub.copyPromptContent',    // Basic operation
-        'promptHub.editPrompt',           // Basic operation
-        'promptHub.aiGenerateMeta',       // AI operation
-        'promptHub.aiOptimize',           // AI operation
-        'promptHub.deletePrompt'          // Danger operation
+        'otter.copyPromptContent',    // Basic operation
+        'otter.editPrompt',           // Basic operation
+        'otter.aiGenerateMeta',       // AI operation
+        'otter.aiOptimize',           // AI operation
+        'otter.deletePrompt'          // Danger operation
       ];
 
       // Verify all commands exist (conceptual test)
       expectedMenuItems.forEach(command => {
         assert.ok(
-          command.startsWith('promptHub.'),
+          command.startsWith('otter.'),
           `Command ${command} should have correct prefix`
         );
       });
@@ -197,10 +197,10 @@ suite('CommandRegistrar Test Suite', () => {
 
     test('should have inline buttons configured', () => {
       const inlineButtons = [
-        { command: 'promptHub.copyPromptContent', order: 1, icon: '$(copy)' },
-        { command: 'promptHub.editPrompt', order: 2, icon: '$(edit)' },
-        { command: 'promptHub.aiOptimize', order: 3, icon: '$(sparkle)' },
-        { command: 'promptHub.deletePrompt', order: 4, icon: '$(trash)' }
+        { command: 'otter.copyPromptContent', order: 1, icon: '$(copy)' },
+        { command: 'otter.editPrompt', order: 2, icon: '$(edit)' },
+        { command: 'otter.aiOptimize', order: 3, icon: '$(sparkle)' },
+        { command: 'otter.deletePrompt', order: 4, icon: '$(trash)' }
       ];
 
       // Verify inline buttons are properly ordered
@@ -221,19 +221,19 @@ suite('CommandRegistrar Test Suite', () => {
   suite('Command Registration Tests', () => {
     test('should register all essential commands', () => {
       const expectedCommands = [
-        'promptHub.openStorageFolder',
-        'promptHub.createFromSelection',
-        'promptHub.copyPromptContent',
-        'promptHub.editPrompt',
-        'promptHub.aiGenerateMeta',
-        'promptHub.aiOptimize',
-        'promptHub.deletePrompt'
+        'otter.openStorageFolder',
+        'otter.createFromSelection',
+        'otter.copyPromptContent',
+        'otter.editPrompt',
+        'otter.aiGenerateMeta',
+        'otter.aiOptimize',
+        'otter.deletePrompt'
       ];
 
       // Verify command naming convention
       expectedCommands.forEach(command => {
         assert.ok(
-          command.startsWith('promptHub.'),
+          command.startsWith('otter.'),
           `Command ${command} follows naming convention`
         );
         assert.ok(
@@ -244,15 +244,15 @@ suite('CommandRegistrar Test Suite', () => {
     });
 
     test('should register editPrompt command', () => {
-      const editCommand = 'promptHub.editPrompt';
+      const editCommand = 'otter.editPrompt';
 
       assert.ok(
-        editCommand.startsWith('promptHub.'),
+        editCommand.startsWith('otter.'),
         'Edit command should have correct prefix'
       );
       assert.strictEqual(
         editCommand,
-        'promptHub.editPrompt',
+        'otter.editPrompt',
         'Edit command should have correct name'
       );
     });
@@ -301,7 +301,7 @@ suite('CommandRegistrar Test Suite', () => {
         id: 'test-3',
         name: 'Valid Prompt',
         content: 'Some content',
-        sourceFile: path.join(os.homedir(), '.prompt-hub', 'test.md')
+        sourceFile: path.join(os.homedir(), '.otter', 'test.md')
       };
 
       // Verify prompt structure

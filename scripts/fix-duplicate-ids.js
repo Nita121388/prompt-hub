@@ -11,7 +11,7 @@ const path = require('path');
 const os = require('os');
 
 // 存储路径（可以从配置读取，这里使用默认值）
-const STORAGE_PATH = path.join(os.homedir(), '.prompt-hub');
+const STORAGE_PATH = path.join(os.homedir(), '.otter');
 
 /**
  * 修复单个Markdown文件
@@ -25,7 +25,7 @@ function fixMarkdownFile(filePath) {
   // 查找所有ID标记行
   const idLines = [];
   lines.forEach((line, index) => {
-    const match = line.match(/<!--\s*PromptHub:id=([\w-]+)\s*-->/i);
+    const match = line.match(/<!--\s*(?:PromptHub|Otter):id=([\w-]+)\s*-->/i);
     if (match) {
       idLines.push({
         lineIndex: index,

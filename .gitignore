@@ -14,6 +14,7 @@ coverage/
 temp.txt
 mytalk.md
 image/
+notes/
 *.backup
 
 # 本地输出/总结类文档（通常不适合入库）
@@ -37,7 +38,7 @@ AI功能详细说明.md
 文档审查报告.md
 🎯_交付清单.md
 
-# 本地调试/实现过程文档（如需发布请移至 docs/ 并经人工整理）
+# 本地调试/实现过程文档（默认放在 notes/；如需发布请移至 docs/ 并经人工整理）
 docs/LOCAL_AI_IMPLEMENTATION_SUMMARY.md
 
 # 本地临时测试脚本

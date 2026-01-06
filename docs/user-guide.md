@@ -3,7 +3,7 @@
 ## 1. 安装与初始化
 
 ### 1.1 安装插件
-1. 打开 VSCode → 扩展市场搜索"Prompt Hub"（暂定名）→ 安装。
+1. 打开 VSCode → 扩展市场搜索"Otter"（暂定名）→ 安装。
 2. 安装完成后，插件会自动激活。
 
 ### 1.2 首次使用引导
@@ -15,7 +15,7 @@
 - 选择"稍后提醒"跳过向导，下次启动时继续提示
 
 **步骤 2：存储路径配置**
-- **本地存储**（推荐）：使用默认路径 `~/.prompt-hub/prompts.json`
+- **本地存储**（推荐）：使用默认路径 `~/.otter/prompts.json`
 - **云盘同步**：选择 OneDrive/坚果云等同步目录，实现跨设备同步
 - **项目级别**：使用工作区路径 `${workspaceFolder}/.prompts/`，适合团队协作
 - 支持浏览文件夹自定义路径
@@ -38,7 +38,7 @@
 - 点击"完成"保存所有配置
 
 **提示**：
-- 向导可随时通过命令"Prompt Hub: 重新开始引导"重新启动
+- 向导可随时通过命令"Otter: 重新开始引导"重新启动
 - 中途取消会保留已配置的部分，下次启动继续提示
 - 所有配置都可以稍后在设置中修改
 
@@ -85,8 +85,8 @@
 - 标准 Markdown 同样支持 emoji：`# 😊 名称`
 
 **配置选项**：
-- `promptHub.selection.autoDetectPromptName`：启用/禁用智能识别（默认启用）
-- `promptHub.selection.removePromptMarker`：是否移除标记行（默认移除）
+- `otter.selection.autoDetectPromptName`：启用/禁用智能识别（默认启用）
+- `otter.selection.removePromptMarker`：是否移除标记行（默认移除）
 
 ### 2.2 命令面板管理
 按 `Ctrl+Shift+P`（Mac: `Cmd+Shift+P`）输入"Prompt"即可看到所有可用命令：
@@ -99,7 +99,7 @@
 命令面板支持模糊搜索，输入关键词即可快速筛选。
 
 ### 2.3 活动栏视图
-点击左侧活动栏的"Prompt Hub"图标浏览所有 Prompt：
+点击左侧活动栏的"Otter"图标浏览所有 Prompt：
 
 **鼠标交互**：
 - **单击**：复制到剪贴板
@@ -139,7 +139,7 @@
 6. 保存后自动同步到 JSON 存储
 
 **文件名模板**：
-可在设置中配置 `promptHub.markdown.filenameTemplate`，支持占位符：
+可在设置中配置 `otter.markdown.filenameTemplate`，支持占位符：
 - `{name}`：Prompt 名称
 - `{timestamp}`：时间戳
 - `{date}`：日期（YYYYMMDD）
@@ -193,12 +193,12 @@
 
 **方式 1：命令面板**
 - 按 `Ctrl+Shift+P`
-- 输入"Prompt Hub: 打开设置"
+- 输入"Otter: 打开设置"
 - 回车打开设置页面
 
 **方式 2：TreeView 工具栏**
 - 点击活动栏 TreeView 顶部的设置图标（齿轮）
-- 自动打开并筛选到 `@ext:publisher.prompt-hub`
+- 自动打开并筛选到 `@ext:publisher.otter`
 
 **方式 3：状态栏警告**
 - 当配置有问题时（如 Git 未配置、API Key 缺失）
@@ -212,42 +212,42 @@
 ### 4.2 关键配置项
 
 **存储配置**：
-- `promptHub.storagePath`：JSON 存储路径（支持 `~`、`${workspaceFolder}` 等变量）
-- `promptHub.storage.autoCreate`：自动创建不存在的目录
-- `promptHub.storage.autoBackup`：定期自动备份
+- `otter.storagePath`：JSON 存储路径（支持 `~`、`${workspaceFolder}` 等变量）
+- `otter.storage.autoCreate`：自动创建不存在的目录
+- `otter.storage.autoBackup`：定期自动备份
 
 **Markdown 镜像**：
-- `promptHub.markdown.enableMirror`：为每个 Prompt 生成 Markdown 文件
-- `promptHub.markdown.mirrorDirectory`：镜像文件目录
-- `promptHub.markdown.filenameTemplate`：文件名模板
-- `promptHub.markdown.askForFilename`：创建时询问文件名
-- `promptHub.markdown.autoRenameOnSave`：保存时是否按标题自动重命名文件（可在 frontmatter 用 `rename: false` 禁用）
+- `otter.markdown.enableMirror`：为每个 Prompt 生成 Markdown 文件
+- `otter.markdown.mirrorDirectory`：镜像文件目录
+- `otter.markdown.filenameTemplate`：文件名模板
+- `otter.markdown.askForFilename`：创建时询问文件名
+- `otter.markdown.autoRenameOnSave`：保存时是否按标题自动重命名文件（可在 frontmatter 用 `rename: false` 禁用）
 
 **Git 同步**：
-- `promptHub.git.enableSync`：启用 Git 同步功能
-- `promptHub.git.autoPullOnStartup`：启动时自动 pull
-- `promptHub.git.commitMessageTemplate`：提交信息模板
-- `promptHub.git.autoCommit`：自动提交更改
+- `otter.git.enableSync`：启用 Git 同步功能
+- `otter.git.autoPullOnStartup`：启动时自动 pull
+- `otter.git.commitMessageTemplate`：提交信息模板
+- `otter.git.autoCommit`：自动提交更改
 
 **AI Provider**：
-- `promptHub.ai.provider`：选择 AI 提供商（openai/azure/custom）
-- `promptHub.ai.model`：模型名称
-- `promptHub.ai.baseUrl`：API 基础 URL
-- `promptHub.ai.temperature`：生成温度（0-2）
-- `promptHub.ai.maxTokens`：最大 token 数
+- `otter.ai.provider`：选择 AI 提供商（openai/azure/custom）
+- `otter.ai.model`：模型名称
+- `otter.ai.baseUrl`：API 基础 URL
+- `otter.ai.temperature`：生成温度（0-2）
+- `otter.ai.maxTokens`：最大 token 数
 
 **选区识别**：
-- `promptHub.selection.autoDetectPromptName`：自动识别 `# prompt:` 标记
-- `promptHub.selection.removePromptMarker`：移除标记行
+- `otter.selection.autoDetectPromptName`：自动识别 `# prompt:` 标记
+- `otter.selection.removePromptMarker`：移除标记行
 
 **UI 交互**：
-- `promptHub.ui.showEmojiPicker`：显示 emoji 选择器
-- `promptHub.ui.defaultView`：默认视图（tree/list）
-- `promptHub.ui.sortBy`：排序方式（name/date/usage）
+- `otter.ui.showEmojiPicker`：显示 emoji 选择器
+- `otter.ui.defaultView`：默认视图（tree/list）
+- `otter.ui.sortBy`：排序方式（name/date/usage）
 
 ### 4.3 多项目共享
 如需在多个项目间共享 Prompt：
-1. 将所有项目的 `promptHub.storagePath` 设置为同一路径
+1. 将所有项目的 `otter.storagePath` 设置为同一路径
 2. 建议使用绝对路径或 `~` 开头的用户目录路径
 3. 如使用云盘，请避免多台电脑同时写入
 
@@ -255,12 +255,12 @@
 
 ### 5.1 初始化 Git 仓库
 如存储目录尚未初始化为 Git 仓库：
-1. 执行命令"Prompt Hub: 初始化 Git 仓库"
+1. 执行命令"Otter: 初始化 Git 仓库"
 2. 配置远程仓库 URL（可选）
 3. 插件会自动执行 `git init` 和 `git remote add origin`
 
 ### 5.2 同步到远程
-执行命令"Prompt Hub: 同步到 GitHub"：
+执行命令"Otter: 同步到 GitHub"：
 1. 插件先执行 `git pull` 拉取远程更改
 2. 如有冲突，提示手动解决
 3. 输入提交信息（或使用默认模板）
@@ -268,20 +268,20 @@
 5. 在 Output Channel 查看同步日志
 
 **自动同步**：
-- 启用 `promptHub.git.autoCommit` 后，每次保存 Prompt 自动提交
-- 启用 `promptHub.git.autoPullOnStartup` 后，启动时自动 pull
+- 启用 `otter.git.autoCommit` 后，每次保存 Prompt 自动提交
+- 启用 `otter.git.autoPullOnStartup` 后，启动时自动 pull
 
 ### 5.3 查看同步状态
 - 状态栏显示 Git 同步状态（同步中/成功/失败）
 - TreeView 工具栏显示同步图标
-- Output Channel - Prompt Hub Git Sync 记录详细日志
+- Output Channel - Otter Git Sync 记录详细日志
 
 ## 6. Markdown 镜像与手动编辑
 
 ### 6.1 启用 Markdown 镜像
-1. 打开设置，启用 `promptHub.markdown.enableMirror`
-2. 配置镜像目录 `promptHub.markdown.mirrorDirectory`
-3. 配置文件名模板 `promptHub.markdown.filenameTemplate`
+1. 打开设置，启用 `otter.markdown.enableMirror`
+2. 配置镜像目录 `otter.markdown.mirrorDirectory`
+3. 配置文件名模板 `otter.markdown.filenameTemplate`
 4. 每次保存 Prompt 时，插件会自动生成对应的 Markdown 文件
 
 ### 6.2 手动编辑 Markdown
@@ -305,13 +305,13 @@
 当您需要在系统文件管理器中查看或管理 Prompt 文件时：
 
 **方法 1：使用工具栏按钮**
-1. 打开 Prompt Hub 侧边栏
+1. 打开 Otter 侧边栏
 2. 点击工具栏的 📂 "打开仓库文件夹" 图标
 3. 系统文件管理器会**直接打开并进入**存储目录（不是仅高亮显示）
 
 **方法 2：使用命令面板**
 1. 按 `Ctrl+Shift+P`（Mac: `Cmd+Shift+P`）
-2. 输入 "Prompt Hub: 打开 Prompt 仓库文件夹"
+2. 输入 "Otter: 打开 Prompt 仓库文件夹"
 3. 回车执行
 
 **功能说明**：
@@ -336,7 +336,7 @@
 **解决方案**：
 - 确认 API Key 配置正确（执行"Prompt: 配置 AI Key"）
 - 检查网络连接，确保可访问 API 端点
-- 在 Output Channel - Prompt Hub 查看详细错误日志
+- 在 Output Channel - Otter 查看详细错误日志
 - 尝试"测试连接"功能验证配置
 
 ### 7.3 自动标题生成失败
@@ -369,7 +369,7 @@
 - 检查网络连接
 - 确认远程仓库 URL 正确
 - 检查是否有未解决的冲突
-- 在 Output Channel - Prompt Hub Git Sync 查看详细错误
+- 在 Output Channel - Otter Git Sync 查看详细错误
 - 尝试手动执行 `git pull` 或 `git push` 排查问题
 
 ### 7.7 首次引导无法完成
@@ -377,7 +377,7 @@
 **解决方案**：
 - 点击"跳过"使用默认配置
 - 关闭向导，手动在设置中配置
-- 执行"Prompt Hub: 重置引导"重新开始
+- 执行"Otter: 重置引导"重新开始
 - 已配置的步骤会被保留，无需担心数据丢失
 
 ## 8. 快捷键与命令
@@ -389,27 +389,27 @@
 - `Delete`：删除选中的 Prompt（在 TreeView 中）
 
 ### 8.2 完整命令列表
-- `Prompt Hub: 创建 Prompt`
-- `Prompt Hub: 复制 Prompt`
-- `Prompt Hub: 编辑 Prompt`
-- `Prompt Hub: 删除 Prompt`
-- `Prompt Hub: 撤销最近删除`
-- `Prompt Hub: 新建 Prompt 文件`
-- `Prompt Hub: AI 生成元信息`
-- `Prompt Hub: AI 优化内容`
-- `Prompt Hub: 查看 AI 消耗`
-- `Prompt Hub: 导出 AI 消耗报表`
-- `Prompt Hub: 导入 Markdown`
-- `Prompt Hub: 导出 Markdown`
-- `Prompt Hub: 初始化 Git 仓库`
-- `Prompt Hub: 同步到 GitHub`
-- `Prompt Hub: 拉取远程更改`
-- `Prompt Hub: 提交并推送`
-- `Prompt Hub: 查看 Git 日志`
-- `Prompt Hub: 打开设置`
-- `Prompt Hub: 开始引导`
-- `Prompt Hub: 重置引导`
-- `Prompt Hub: 配置 AI Key`
+- `Otter: 创建 Prompt`
+- `Otter: 复制 Prompt`
+- `Otter: 编辑 Prompt`
+- `Otter: 删除 Prompt`
+- `Otter: 撤销最近删除`
+- `Otter: 新建 Prompt 文件`
+- `Otter: AI 生成元信息`
+- `Otter: AI 优化内容`
+- `Otter: 查看 AI 消耗`
+- `Otter: 导出 AI 消耗报表`
+- `Otter: 导入 Markdown`
+- `Otter: 导出 Markdown`
+- `Otter: 初始化 Git 仓库`
+- `Otter: 同步到 GitHub`
+- `Otter: 拉取远程更改`
+- `Otter: 提交并推送`
+- `Otter: 查看 Git 日志`
+- `Otter: 打开设置`
+- `Otter: 开始引导`
+- `Otter: 重置引导`
+- `Otter: 配置 AI Key`
 
 ## 9. 开发者附录
 
@@ -427,11 +427,11 @@ npm run package
 ### 9.3 调试
 1. 在 VSCode 中打开项目
 2. 按 `F5` 启动 Extension Development Host
-3. 在 Output Channel - Prompt Hub 查看日志
+3. 在 Output Channel - Otter 查看日志
 4. 使用断点调试代码
 
 ### 9.4 贡献指南
-- 提交 Issue：[GitHub Issues](https://github.com/your-repo/prompt-hub/issues)
+- 提交 Issue：[GitHub Issues](https://github.com/your-repo/otter/issues)
 - 贡献代码：Fork → Branch → Commit → Pull Request
 - 遵循代码风格和测试覆盖率要求
 
