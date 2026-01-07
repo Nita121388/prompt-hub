@@ -19,6 +19,35 @@ export class PromptFileService {
   ) {}
 
   /**
+   * ä½¿ç”¨ Prompt æ•°æ®ç›´æŽ¥ç”Ÿæˆ Markdown æ–‡ä»¶ï¼Œè¿”å›žå®Œæ•´è·¯å¾„
+   */
+  async savePromptMarkdown(prompt: Prompt): Promise<string> {
+    const storagePath = this.configService.getStoragePath();
+    const template = this.configService.get<string>(
+      'markdown.filenameTemplate',
+      'prompt-{timestamp}.md'
+    );
+    // æ ‡é¢˜åŒæ­¥ï¼šé»˜è®¤æ¨¡æ¿æ²¡æœ‰ {name} / {emoji} æ—¶ï¼Œè‡ªåŠ¨æ‰«æå–æ ‡é¢˜åç§°
+    const effectiveTemplate =
+      template.includes('{name}') || template.includes('{emoji}')
+        ? template
+        : '{name}-{timestamp}.md';
+
+    const filename = this.formatFilename(effectiveTemplate, {
+      name: prompt.name,
+      emoji: prompt.emoji,
+    });
+
+    await fs.mkdir(storagePath, { recursive: true });
+    const filepath = await this.makeUniquePath(path.join(storagePath, filename));
+
+    const markdown = this.composeMarkdown(prompt);
+    await fs.writeFile(filepath, markdown, 'utf-8');
+
+    return filepath;
+  }
+
+  /**
    * 新建 Prompt Markdown 文件并在编辑器中打开
    */
   async createPromptFile(): Promise<void> {
@@ -172,6 +201,26 @@ export class PromptFileService {
     }
 
     console.log('[PromptFileService] 新建 Prompt 文件流程结束');
+  }
+
+  /**
+   * 将 Prompt 数据转成 Markdown 文本（含 frontmatter）
+   */
+  private composeMarkdown(p: Prompt): string {
+    const frontmatterLines = [
+      '---',
+      `id: ${p.id}`,
+      'type: prompt',
+      p.emoji ? `emoji: ${p.emoji}` : undefined,
+      p.tags && p.tags.length ? `tags: [${p.tags.join(', ')}]` : undefined,
+      '---',
+      '',
+    ].filter(Boolean) as string[];
+
+    const titleLine = `# ${p.emoji ? `${p.emoji} ` : ''}${p.name}`.trimEnd();
+    const body = p.content ?? '';
+
+    return [...frontmatterLines, titleLine, '', body, ''].join('\n');
   }
 
   /**

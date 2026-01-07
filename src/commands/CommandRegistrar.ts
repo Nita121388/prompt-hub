@@ -126,6 +126,7 @@ export class CommandRegistrar {
       });
       if (tagsInput === undefined) return;
       const parsedTags = this.parseTagsInput(tagsInput);
+      const finalTags = parsedTags.length ? parsedTags : ['prompt'];
 
       const prompt: Prompt = {
         id: generateId(),
@@ -135,8 +136,18 @@ export class CommandRegistrar {
         createdAt: new Date().toISOString(),
         updatedAt: new Date().toISOString(),
         sourceFile: editor.document.uri.fsPath,
-        tags: parsedTags,
+        tags: finalTags,
       };
+
+      try {
+        // 将 Prompt 落盘成 Markdown，保证在存储路径中可见
+        const fileService = new PromptFileService(this.configService, this.storageService);
+        const filepath = await fileService.savePromptMarkdown(prompt);
+        prompt.sourceFile = filepath;
+      } catch (err) {
+        console.error('[CommandRegistrar] 保存 Prompt Markdown 失败', err);
+        throw err;
+      }
 
       await this.storageService.add(prompt);
       this.treeProvider.refresh();
