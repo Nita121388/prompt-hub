@@ -2,7 +2,7 @@
 
 > VSCode 插件，用于统一管理和组织 AI Prompt，支持本地存储、Git 同步、AI 辅助生成（开发测试中）
 
-[![Version](https://img.shields.io/badge/version-0.1.0-blue.svg)](https://marketplace.visualstudio.com/items?itemName=Nita121388.otter)
+[![Version](https://img.shields.io/badge/version-0.1.9-blue.svg)](https://marketplace.visualstudio.com/items?itemName=Nita121388.otter)
 [![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 
 ## ✨ 功能特性

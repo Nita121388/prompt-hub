@@ -19,7 +19,7 @@ export class PromptFileService {
   ) {}
 
   /**
-   * ä½¿ç”¨ Prompt æ•°æ®ç›´æŽ¥ç”Ÿæˆ Markdown æ–‡ä»¶ï¼Œè¿”å›žå®Œæ•´è·¯å¾„
+   * 使用 Prompt 数据直接生成 Markdown 文件，返回完整路径
    */
   async savePromptMarkdown(prompt: Prompt): Promise<string> {
     const storagePath = this.configService.getStoragePath();
@@ -27,7 +27,7 @@ export class PromptFileService {
       'markdown.filenameTemplate',
       'prompt-{timestamp}.md'
     );
-    // æ ‡é¢˜åŒæ­¥ï¼šé»˜è®¤æ¨¡æ¿æ²¡æœ‰ {name} / {emoji} æ—¶ï¼Œè‡ªåŠ¨æ‰«æå–æ ‡é¢˜åç§°
+    // 标题同步：默认模板没有 {name} / {emoji} 时，自动提取标题名称
     const effectiveTemplate =
       template.includes('{name}') || template.includes('{emoji}')
         ? template

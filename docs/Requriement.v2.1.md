@@ -92,6 +92,13 @@
 - **交互补充**：
   - 右键“发送到 Obsidian”可在无命令输入时完成 capture
   - 选中文本右键可先弹出关键字选择/自动建议，再执行落盘
+  - **资源右键落盘（文件/文件夹）**：在 VSCode 资源管理器（Explorer）对文件或文件夹右键，支持“存储到 Obsidian”
+    - 文件：复制到 Vault 的附件目录（如 `Vault/Attachments/` 或按规则分流），并可选择同时生成一条引用该文件的笔记（含来源路径、时间、标签/项目）
+    - 文件夹：按规则将文件夹（可选递归）复制到 Vault 指定目录，并自动生成 `index.md`（或同名 `.md`）作为目录索引，列出子文件/子目录链接，便于在 Obsidian 内浏览
+    - **默认存储路径 + 选择新路径**：
+      - 默认：优先写入用户配置的“默认目标目录”（可按 capture/附件分别配置）
+      - 临时改路径：右键菜单提供“存储到 Obsidian（选择路径）”，弹出 Vault 内目录选择器（或输入相对路径）本次生效
+      - 可选：在选择路径对话框中提供“设为默认路径”的勾选项，用于把本次选择写回设置（提升长期使用效率）
 
 ### 4.3 在 VSCode 中显示/编辑 Obsidian 的 md
 推荐两种入口（都可以做）：
@@ -135,6 +142,9 @@ MVP 建议先做 1)，因为 VSCode 原生文件浏览/搜索/Markdown 预览已
   - `prompthub.vaultPath`
   - `prompthub.rulesPath`
   - `prompthub.timeFormat`
+  - `prompthub.capture.defaultTargetDir`（默认写入的 Vault 子目录：如 `Inbox/`、`Projects/<name>/`）
+  - `prompthub.capture.attachmentsDir`（文件右键“存储到 Obsidian”的附件目录：如 `Attachments/`）
+  - `prompthub.capture.alwaysAskTargetDir`（右键/命令触发时是否总是弹出“选择路径”）
   - `prompthub.summary.cliPath`
   - `prompthub.summary.model/provider`（如果 CLI 也读配置）
   - `prompthub.summary.extraFiles`（纳入总结的固定文件列表）
@@ -152,6 +162,7 @@ MVP 建议先做 1)，因为 VSCode 原生文件浏览/搜索/Markdown 预览已
 ## 7. MVP 里程碑（建议 2 周内可交付）
 1) VSCode 扩展：插入时间（命令面板+快捷键+`@time`）
 2) Vault 打开与写入：`@capture kw=...` 按规则写入/append（含右键/选中快速捕获）
+2.1) Explorer 右键：文件/文件夹“存储到 Obsidian”（支持默认路径与“选择新路径”）
 3) 当日聚合：自动生成/更新 `Daily/日期.md`
 4) AI CLI：读当日聚合文件 → 生成总结 md → 写入 `Reports/Daily/`
 
