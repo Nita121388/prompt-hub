@@ -10,6 +10,10 @@ import { GitSyncService } from './services/GitSyncService';
 import { PromptSearchCodeActionProvider } from './providers/PromptSearchCodeActionProvider';
 import { TimeCommandService } from './services/TimeCommandService';
 import { logger } from './services/Logger';
+import { DailyLogService } from './services/DailyLogService';
+import { DailyTaskTreeProvider } from './providers/DailyTaskTreeProvider';
+import { DailyLogAutoDetectService } from './services/DailyLogAutoDetectService';
+import { MarkdownQuickCommandService } from './services/MarkdownQuickCommandService';
 
 /**
  * 插件激活时调用
@@ -45,6 +49,65 @@ export async function activate(context: vscode.ExtensionContext) {
     });
     context.subscriptions.push(treeView);
 
+    // 今日日志任务 TreeView（计时）
+    const dailyLogService = new DailyLogService(context, configService);
+    const dailyTaskProvider = new DailyTaskTreeProvider(dailyLogService);
+    const dailyTaskView = vscode.window.createTreeView('otterDailyTaskView', {
+      treeDataProvider: dailyTaskProvider,
+      canSelectMany: false,
+    });
+    context.subscriptions.push(dailyTaskView);
+
+    // 启动时友好提示：今日任务/今日日志未配置
+    try {
+      dailyLogService.getTodayLogPaths(new Date());
+    } catch (err) {
+      const key = 'otter.dailyLog.configHintShownVersion';
+      const currentVersion = String(context.extension.packageJSON?.version ?? '0');
+      const shownVersion = context.workspaceState.get<string>(key);
+
+      if (shownVersion !== currentVersion) {
+        void context.workspaceState.update(key, currentVersion);
+
+        const message =
+          '今日任务/今日日志尚未配置：请配置 Obsidian Vault（otter.obsidian.vaultPath），或将今日日志目录（otter.dailyLog.directory）设置为绝对路径。';
+        const action = await vscode.window.showWarningMessage(
+          message,
+          '打开配置向导',
+          '打开设置'
+        );
+        if (action === '打开配置向导') {
+          await vscode.commands.executeCommand('otter.startOnboarding');
+        } else if (action === '打开设置') {
+          await vscode.commands.executeCommand('workbench.action.openSettings', 'otter.dailyLog');
+        }
+      }
+    }
+
+    // 任意 Markdown：@结束/@end/@over + Enter 自动结束任务，并在当前行补充时长
+    // 统一的 Markdown 回车指令路由：@time 渲染 + @start/@end/@add/@new/@+ 组合动作
+    // - 默认启用（quickCmd.enableOnEnter=true）
+    // - 若关闭，则回退旧的 @time 渲染与 @end 自动结束逻辑
+    const quickCmdEnabled = configService.get<boolean>('quickCmd.enableOnEnter', true);
+    if (quickCmdEnabled) {
+      const quickCmdService = new MarkdownQuickCommandService(
+        configService,
+        dailyLogService,
+        () => dailyTaskProvider.refresh()
+      );
+      quickCmdService.bindOnEnter(context);
+    } else {
+      const dailyAutoDetectService = new DailyLogAutoDetectService(dailyLogService);
+      dailyAutoDetectService.bindAutoDetectOnEnter(context);
+
+      const timeCommandService = new TimeCommandService(configService);
+      timeCommandService.bindAutoRenderOnEnter(context);
+    }
+
+    // 运行中任务时长：每分钟刷新一次（只刷新 UI，不写文件）
+    const timer = setInterval(() => dailyTaskProvider.refresh(), 60_000);
+    context.subscriptions.push({ dispose: () => clearInterval(timer) });
+
     // 监听 storagePath 配置变更，动态切换存储目录并刷新视图
     context.subscriptions.push(
       configService.onDidChange(async (e) => {
@@ -73,7 +136,9 @@ export async function activate(context: vscode.ExtensionContext) {
       storageService,
       configService,
       treeProvider,
-      treeView
+      treeView,
+      dailyLogService,
+      dailyTaskProvider
     );
     commandRegistrar.registerAll();
 
@@ -90,9 +155,6 @@ export async function activate(context: vscode.ExtensionContext) {
     logger.debug('[Extension] MarkdownMirrorService 已创建');
     mirrorService.bindOnSave(context);
     mirrorService.bindOnStorageChange(context);
-
-    const timeCommandService = new TimeCommandService(configService);
-    timeCommandService.bindAutoRenderOnEnter(context);
 
     // 初始化状态栏
     const statusBarService = new StatusBarService(context, configService);

@@ -445,6 +445,98 @@ export class AIService {
   }
 
   /**
+   * 通用对话接口：返回 assistant 文本（用于“今日总结”等场景）
+   */
+  async chat(
+    systemPrompt: string,
+    userContent: string,
+    options?: { temperature?: number; maxUserChars?: number }
+  ): Promise<string> {
+    const providerRaw = this.config.get<string>('ai.provider', '').trim();
+    if (!providerRaw) {
+      void vscode.window.showWarningMessage(
+        '尚未配置 AI 提供商，请先运行「Otter: 配置向导」或在设置中配置 otter.ai.provider。'
+      );
+      return '';
+    }
+
+    const provider = providerRaw as AIProvider;
+    const supportedProviders: AIProvider[] = [
+      'openai',
+      'azure',
+      'gemini',
+      'deepseek',
+      'qwen',
+      'custom',
+      'local-claude',
+      'local-codex',
+    ];
+
+    if (!supportedProviders.includes(provider)) {
+      void vscode.window.showWarningMessage(`不支持的 AI 提供商：${provider}`);
+      return '';
+    }
+
+    const temperature = options?.temperature ?? this.config.get<number>('ai.temperature', 0.3);
+    const maxUserChars = options?.maxUserChars ?? 12_000;
+    const userText = (userContent || '').substring(0, Math.max(1000, maxUserChars));
+
+    // 本地 Claude Code
+    if (provider === 'local-claude') {
+      try {
+        return await this.localClaudeProvider.chat(systemPrompt, userText);
+      } catch (error) {
+        void vscode.window.showWarningMessage(`本地 Claude Code 调用失败：${(error as Error).message}`);
+        return '';
+      }
+    }
+
+    // 本地 Codex
+    if (provider === 'local-codex') {
+      try {
+        return await this.localCodexProvider.chat(systemPrompt, userText);
+      } catch (error) {
+        void vscode.window.showWarningMessage(`本地 Codex 调用失败：${(error as Error).message}`);
+        return '';
+      }
+    }
+
+    // 云端 API 调用
+    try {
+      const apiKey = await this.getApiKey(provider);
+      if (!apiKey) throw new Error('未配置 API Key');
+
+      const baseUrl = this.config.get<string>('ai.baseUrl', '').trim();
+      const configuredModel = this.config.get<string>('ai.model', '').trim();
+      const model = configuredModel || this.getDefaultModel(provider);
+
+      const requestBody = this.buildRequestBody(provider, model, temperature, [
+        { role: 'system', content: systemPrompt || '' },
+        { role: 'user', content: userText },
+      ]);
+
+      const endpoint = this.buildApiUrl(provider, baseUrl, model);
+      const url = provider === 'gemini' ? `${endpoint}?key=${apiKey}` : endpoint;
+      const headers = this.buildHeaders(provider, apiKey);
+
+      const res = await fetch(url, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify(requestBody),
+      });
+
+      if (!res.ok) throw new Error(`HTTP ${res.status}: ${res.statusText}`);
+
+      const data: unknown = await res.json();
+      const text = this.parseResponse(provider, data);
+      return text || '';
+    } catch (e) {
+      void vscode.window.showWarningMessage(`AI 调用失败：${(e as Error).message}`);
+      return '';
+    }
+  }
+
+  /**
    * 降级处理：从内容第一行生成元信息
    */
   private fallbackMeta(content: string): GeneratedMeta {

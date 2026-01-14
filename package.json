@@ -2,7 +2,7 @@
   "name": "otter",
   "displayName": "Otter Prompt Desk",
   "description": "VSCode 插件，用于统一管理 Prompt，支持本地存储、Git 同步、AI 辅助生成，后续将扩展快速创建文件/目录与笔记时间戳同步。",
-  "version": "0.1.17",
+  "version": "0.2.0",
   "engines": {
     "vscode": "^1.85.0"
   },
@@ -16,6 +16,7 @@
     "ai",
     "gpt",
     "openai",
+    "obsidian",
     "snippet",
     "prompt-management"
   ],
@@ -175,6 +176,30 @@
         "title": "🧹 Otter: 关闭所有已打开 Prompt",
         "category": "Otter",
         "icon": "$(close-all)"
+      },
+      {
+        "command": "otter.dailyLog.record",
+        "title": "📝 Otter: 记录到今日日志",
+        "category": "Otter",
+        "icon": "$(clock)"
+      },
+      {
+        "command": "otter.dailyLog.endPick",
+        "title": "⏹️ Otter: 结束任务（选择运行中任务）",
+        "category": "Otter",
+        "icon": "$(check)"
+      },
+      {
+        "command": "otter.dailyLog.refreshTasks",
+        "title": "🔄 Otter: 刷新今日任务",
+        "category": "Otter",
+        "icon": "$(refresh)"
+      },
+      {
+        "command": "otter.dailyLog.openTodayLog",
+        "title": "📄 Otter: 打开今日日志",
+        "category": "Otter",
+        "icon": "$(file-text)"
       }
     ],
     "submenus": [
@@ -197,6 +222,10 @@
         {
           "id": "otterView",
           "name": "Prompts"
+        },
+        {
+          "id": "otterDailyTaskView",
+          "name": "今日任务"
         }
       ]
     },
@@ -204,7 +233,7 @@
       "editor/context": [
         {
           "submenu": "otter.editorContext",
-          "when": "editorHasSelection",
+          "when": "editorTextFocus",
           "group": "9_cutcopypaste"
         }
       ],
@@ -228,6 +257,11 @@
           "command": "otter.obsidian.appendToFile",
           "when": "editorHasSelection",
           "group": "2_obsidian@2"
+        },
+        {
+          "command": "otter.dailyLog.record",
+          "when": "editorTextFocus",
+          "group": "2_obsidian@3"
         }
       ],
       "view/title": [
@@ -275,6 +309,21 @@
           "command": "otter.batchOptimizeMeta",
           "when": "view == otterView",
           "group": "navigation@7"
+        },
+        {
+          "command": "otter.dailyLog.refreshTasks",
+          "when": "view == otterDailyTaskView",
+          "group": "navigation"
+        },
+        {
+          "command": "otter.dailyLog.openTodayLog",
+          "when": "view == otterDailyTaskView",
+          "group": "navigation@0"
+        },
+        {
+          "command": "otter.dailyLog.endPick",
+          "when": "view == otterDailyTaskView",
+          "group": "navigation@1"
         }
       ],
       "view/item/context": [
@@ -351,6 +400,187 @@
           "description": "Obsidian Vault 根目录路径（用于“创建到 Obsidian / 添加到 Obsidian 文件”）。",
           "markdownDescription": "Obsidian Vault 根目录路径。\n\n用于编辑器右键：\n- “创建到 Obsidian（选择文件夹）”\n- “添加到 Obsidian 文件（选择文件）”\n\n示例（Windows）：`E:\\\\File\\\\NitaFile\\\\Obsidian\\\\Obsidian`\n\n提示：该功能仅做文件系统写入，不依赖 Obsidian 是否运行。",
           "order": 0.5
+        },
+        "otter.obsidian.quickAdd.defaultKey": {
+          "type": "string",
+          "default": "",
+          "description": "快捷追加（@add/@+）默认 key（用于映射到目标文件）。",
+          "markdownDescription": "快捷追加（`@add` / `@+`）默认 key。\n\n当你在 Markdown 中写 `@add` / `@+` 但未指定 `to key` 时，会使用该 key。\n\n目标文件由 `otter.obsidian.quickAdd.files` 配置。",
+          "order": 0.51
+        },
+        "otter.obsidian.quickAdd.defaultNewKey": {
+          "type": "string",
+          "default": "",
+          "description": "快捷新建（@new/@file/@folder）默认 key（用于映射到目标文件夹）。",
+          "markdownDescription": "快捷新建（`@new` / `@file` / `@folder`）默认 key。\n\n当你在 Markdown 中写 `@new` / `@file` / `@folder` 但未指定 `to key` 时，会使用该 key。\n\n目标文件夹由 `otter.obsidian.quickAdd.folders` 配置。",
+          "order": 0.52
+        },
+        "otter.obsidian.quickAdd.files": {
+          "type": "object",
+          "default": {},
+          "description": "快捷追加 key→文件路径映射（相对 Vault 的 .md 路径，或绝对路径）。",
+          "markdownDescription": "快捷追加 key→文件路径映射。\n\n示例：\n```json\n{\n  \"inbox\": \"Inbox.md\",\n  \"work\": \"Work/工作记录.md\"\n}\n```\n\n路径可写：\n- 相对路径：基于 `otter.obsidian.vaultPath`\n- 绝对路径：直接写入该文件",
+          "additionalProperties": { "type": "string" },
+          "order": 0.53
+        },
+        "otter.obsidian.quickAdd.folders": {
+          "type": "object",
+          "default": {},
+          "description": "快捷新建 key→文件夹路径映射（相对 Vault 的文件夹路径，或绝对路径）。",
+          "markdownDescription": "快捷新建 key→文件夹路径映射。\n\n示例：\n```json\n{\n  \"proj\": \"Projects\",\n  \"work\": \"Work\"\n}\n```\n\n路径可写：\n- 相对路径：基于 `otter.obsidian.vaultPath`\n- 绝对路径：直接写入该文件夹",
+          "additionalProperties": { "type": "string" },
+          "order": 0.54
+        },
+        "otter.obsidian.quickFile.defaultExtension": {
+          "type": "string",
+          "default": "md",
+          "description": "@file 未写扩展名时使用的默认扩展名（默认 md）。",
+          "markdownDescription": "`@file` 未写扩展名时使用的默认扩展名。\n\n示例：\n- `@file README to proj` → 创建 `README.md`\n- 若设为 `txt`：`@file README` → 创建 `README.txt`",
+          "order": 0.55
+        },
+        "otter.dailyLog.directory": {
+          "type": "string",
+          "default": "",
+          "description": "今日日志目录（相对路径会基于 Obsidian Vault）。留空表示直接使用 Vault 根目录。",
+          "markdownDescription": "今日日志目录。\n\n- 留空：使用 `otter.obsidian.vaultPath` 根目录\n- 相对路径：基于 Vault（例如 `Daily`）\n- 绝对路径：直接写入该目录（此时不强制要求配置 Vault）",
+          "order": 0.6
+        },
+        "otter.dailyLog.filenameTemplate": {
+          "type": "string",
+          "default": "{date}.md",
+          "description": "今日日志文件名模板（默认 YYYY-MM-DD.md）。支持 {date} 占位符。",
+          "markdownDescription": "今日日志文件名模板。\n\n- `{date}`：当天日期（YYYY-MM-DD）\n\n默认：`{date}.md` → `2026-01-14.md`",
+          "order": 0.61
+        },
+        "otter.dailyLog.timeFormat": {
+          "type": "string",
+          "default": "YYYY-MM-DD HH:mm:ss",
+          "description": "今日日志中写入时间的格式（开始/结束记录）。",
+          "markdownDescription": "今日日志中写入时间的格式（开始/结束记录）。\n\n示例：`YYYY-MM-DD HH:mm:ss`、`YYYY-MM-DD HH:mm`、`HH:mm:ss`、`HH:mm`",
+          "order": 0.62
+        },
+        "otter.dailyLog.endKeywords": {
+          "type": "array",
+          "default": [
+            "结束",
+            "end",
+            "over"
+          ],
+          "items": {
+            "type": "string"
+          },
+          "description": "用于判定“结束任务”的关键字列表（英文按单词边界匹配，大小写不敏感）。",
+          "markdownDescription": "用于判定“结束任务”的关键字列表。\n\n- 中文：普通包含匹配（如 `结束`）\n- 英文/数字/下划线：单词边界匹配（如 `end` 不会误匹配 `bend`），大小写不敏感\n\n默认：`[\"结束\", \"end\", \"over\"]`",
+          "order": 0.63
+        },
+        "otter.dailyLog.autoDetectOnEnter": {
+          "type": "boolean",
+          "default": true,
+          "description": "在任意 Markdown 中输入 @结束/@end/@over 后按 Enter，自动结束任务并在该行补充时长（精确到秒）。",
+          "markdownDescription": "在任意 Markdown 中输入 `@结束` / `@end` / `@over` 后按 Enter，自动结束任务并在当前行末尾补充时长（精确到秒）。\n\n- 结束关键字由 `otter.dailyLog.endKeywords` 控制\n- 并行任务：若无法唯一匹配，会弹出列表让你选择要结束的任务\n- 若匹配不到运行中任务：会询问是否将该行作为普通文本追加到今日日志",
+          "order": 0.64
+        },
+        "otter.quickCmd.fileKeywords": {
+          "type": "array",
+          "default": ["file", "文件"],
+          "items": { "type": "string" },
+          "description": "Markdown 回车快捷指令：创建文件关键字列表（需以 @ 前缀使用，例如 @file）。",
+          "markdownDescription": "Markdown 回车快捷指令：创建文件关键字列表。\n\n示例：`@file README to proj`",
+          "order": 0.65
+        },
+        "otter.quickCmd.folderKeywords": {
+          "type": "array",
+          "default": ["folder", "文件夹", "目录"],
+          "items": { "type": "string" },
+          "description": "Markdown 回车快捷指令：创建文件夹关键字列表（需以 @ 前缀使用，例如 @folder）。",
+          "markdownDescription": "Markdown 回车快捷指令：创建文件夹关键字列表。\n\n示例：`@folder 技术支持 to work`",
+          "order": 0.66
+        },
+        "otter.quickCmd.enableOnEnter": {
+          "type": "boolean",
+          "default": true,
+          "description": "是否启用 Markdown 回车快捷指令（@start/@end/@add/@new/@file/@folder/@summary 等）。",
+          "markdownDescription": "是否启用 Markdown 回车快捷指令。\n\n开启后，在任意 `.md` 中输入带 `@` 的指令并按 Enter，会自动触发对应动作。",
+          "order": 0.67
+        },
+        "otter.quickCmd.startKeywords": {
+          "type": "array",
+          "default": ["start", "begin", "开始"],
+          "items": { "type": "string" },
+          "description": "Markdown 回车快捷指令：开始计时关键字列表（需以 @ 前缀使用，例如 @start）。",
+          "markdownDescription": "开始计时关键字列表。\n\n示例：`@time 任务 @start`",
+          "order": 0.68
+        },
+        "otter.quickCmd.endKeywords": {
+          "type": "array",
+          "default": ["end", "over", "stop", "结束"],
+          "items": { "type": "string" },
+          "description": "Markdown 回车快捷指令：结束任务关键字列表（需以 @ 前缀使用，例如 @end）。",
+          "markdownDescription": "结束任务关键字列表。\n\n示例：`@time 任务 @end`",
+          "order": 0.69
+        },
+        "otter.quickCmd.addKeywords": {
+          "type": "array",
+          "default": ["add", "append", "添加", "+"],
+          "items": { "type": "string" },
+          "description": "Markdown 回车快捷指令：追加到文件关键字列表（需以 @ 前缀使用，例如 @add 或 @+）。",
+          "markdownDescription": "追加到文件关键字列表。\n\n示例：`@time 内容 @+ to inbox`",
+          "order": 0.7
+        },
+        "otter.quickCmd.newKeywords": {
+          "type": "array",
+          "default": ["new", "create", "新建"],
+          "items": { "type": "string" },
+          "description": "Markdown 回车快捷指令：新建到文件夹关键字列表（需以 @ 前缀使用，例如 @new）。",
+          "markdownDescription": "新建到文件夹关键字列表。\n\n示例：`@time 标题 @new to proj`",
+          "order": 0.71
+        },
+        "otter.quickCmd.summaryKeywords": {
+          "type": "array",
+          "default": ["summary", "总结"],
+          "items": { "type": "string" },
+          "description": "Markdown 回车快捷指令：AI 总结关键字列表（需以 @ 前缀使用，例如 @summary）。",
+          "markdownDescription": "AI 总结关键字列表。\n\n示例：`@summary @today`",
+          "order": 0.72
+        },
+        "otter.quickCmd.todayKeywords": {
+          "type": "array",
+          "default": ["today", "今日"],
+          "items": { "type": "string" },
+          "description": "Markdown 回车快捷指令：@today 关键字列表（用于 @summary @today）。",
+          "markdownDescription": "@today 关键字列表。\n\n示例：`@summary @today @filename 日报.md`",
+          "order": 0.73
+        },
+        "otter.quickCmd.filenameKeywords": {
+          "type": "array",
+          "default": ["filename", "文件名"],
+          "items": { "type": "string" },
+          "description": "Markdown 回车快捷指令：@filename 关键字列表（用于 @summary 指定输出文件）。",
+          "markdownDescription": "@filename 关键字列表。\n\n示例：`@summary @today @filename work`（若 work 是已配置 key 则写入映射文件）",
+          "order": 0.74
+        },
+        "otter.summary.maxInputChars": {
+          "type": "number",
+          "default": 12000,
+          "minimum": 1000,
+          "maximum": 200000,
+          "description": "AI 总结时最多输入的字符数（超出会截取末尾部分）。",
+          "markdownDescription": "AI 总结时最多输入的字符数。\n\n当当前草稿内容过长时，会自动截取末尾 N 字符用于总结，以控制成本与速度。",
+          "order": 0.75
+        },
+        "otter.summary.showTemplatePreviewBeforeRun": {
+          "type": "boolean",
+          "default": true,
+          "description": "执行 @summary 前是否预览总结模板并确认（默认开启，避免误写）。",
+          "markdownDescription": "执行 `@summary @today` 前是否预览总结模板并确认。\n\n- `true`：每次都会弹窗预览模板（前若干行）并确认\n- `false`：直接生成总结",
+          "order": 0.751
+        },
+        "otter.summary.template": {
+          "type": "string",
+          "default": "## {date} 今日总结\\n\\n### 任务用时（计时）\\n{timedTasksTable}\\n\\n### 今日完成\\n{ai}\\n\\n### 进行中/待办\\n- （无）\\n\\n### 问题与解决\\n- （无）\\n\\n### 明日计划\\n- （无）\\n\\n> 来源：{draftFile}\\n",
+          "description": "AI 今日总结的模板（Markdown，多行）。支持 {date}/{draftFile}/{timedTasksTable}/{ai} 占位符。",
+          "markdownDescription": "AI 今日总结模板（Markdown，多行）。\n\n支持占位符：\n- `{date}`：YYYY-MM-DD\n- `{draftFile}`：当前草稿文件名\n- `{timedTasksTable}`：今日日志计时任务表（含每项时长）\n- `{ai}`：AI 生成内容插入点（建议保留）\n\n示例：\n- `## {date} 今日总结`",
+          "order": 0.752
         },
         "otter.storagePath": {
           "type": "string",

@@ -215,6 +215,9 @@ export class OnboardingWizard {
             this.state.obsidianVaultPath = vaultResult.vaultPath || undefined;
           }
 
+          // 同步配置：今日日志（可选，但建议）
+          await this.configureDailyLog(this.state.obsidianVaultPath);
+
           this.state.step = 3;
           await this.saveState();
 
@@ -587,6 +590,179 @@ export class OnboardingWizard {
     );
 
     return { type: 'next', vaultPath: picked };
+  }
+
+  // ========== 步骤 3.5：今日日志（可选）==========
+
+  private async configureDailyLog(vaultPath?: string): Promise<void> {
+    interface Option extends vscode.QuickPickItem {
+      value: 'configure' | 'skip';
+    }
+
+    const selected = await vscode.window.showQuickPick<Option>(
+      [
+        {
+          label: '$(clock) 配置“今日日志 / 今日任务”（推荐）',
+          description: '支持 @end/@结束 回车自动结束任务，并在侧边栏显示今日任务',
+          value: 'configure',
+          picked: true,
+        },
+        {
+          label: '$(circle-slash) 暂不配置',
+          description: '以后可在设置中配置 otter.dailyLog.*',
+          value: 'skip',
+        },
+      ],
+      {
+        title: '步骤 3/5：今日日志配置（可选）',
+        placeHolder: '是否配置今日日志目录与结束关键字？',
+        ignoreFocusOut: true,
+      }
+    );
+
+    if (!selected || selected.value === 'skip') return;
+
+    const currentDir = this.configService.get<string>('dailyLog.directory', '').trim();
+    const hasVault = !!(vaultPath || '').trim();
+
+    interface DirOption extends vscode.QuickPickItem {
+      value: 'vaultRoot' | 'daily' | 'customRelative' | 'pickAbsolute';
+    }
+
+    const dirOptions: DirOption[] = [];
+    if (hasVault) {
+      dirOptions.push({
+        label: '$(file-directory) 使用 Vault 根目录',
+        description: '今日日志直接写到 Vault 根目录（otter.dailyLog.directory 为空）',
+        value: 'vaultRoot',
+        picked: currentDir === '',
+      });
+      dirOptions.push({
+        label: '$(file-directory) 使用 Daily 目录（推荐）',
+        description: '今日日志写到 Vault/Daily/ 下（otter.dailyLog.directory = Daily）',
+        value: 'daily',
+        picked: currentDir.toLowerCase() === 'daily',
+      });
+      dirOptions.push({
+        label: '$(edit) 自定义相对目录…',
+        description: '例如 Daily/Work、Logs（相对 Vault）',
+        value: 'customRelative',
+      });
+    }
+
+    dirOptions.push({
+      label: '$(folder-opened) 选择绝对目录…',
+      description: '直接选择一个绝对路径（不依赖 Vault）',
+      value: 'pickAbsolute',
+      picked: !hasVault && !!currentDir && path.isAbsolute(currentDir),
+    });
+
+    const dirPicked = await vscode.window.showQuickPick(dirOptions, {
+      title: '今日日志目录',
+      placeHolder: hasVault ? '选择今日日志写入目录' : '未配置 Vault：只能选择绝对目录',
+      ignoreFocusOut: true,
+    });
+    if (!dirPicked) return;
+
+    let finalDir = currentDir;
+    if (dirPicked.value === 'vaultRoot') {
+      finalDir = '';
+    } else if (dirPicked.value === 'daily') {
+      finalDir = 'Daily';
+    } else if (dirPicked.value === 'customRelative') {
+      const input = await vscode.window.showInputBox({
+        title: '输入相对目录（基于 Vault）',
+        prompt: '例如：Daily/Work 或 Logs',
+        value: currentDir || 'Daily',
+        ignoreFocusOut: true,
+        validateInput: (v) => {
+          const t = (v || '').trim();
+          if (!t) return '目录不能为空';
+          if (path.isAbsolute(t)) return '这里需要相对路径（不要以盘符/根路径开头）';
+          return undefined;
+        },
+      });
+      if (input === undefined) return;
+      finalDir = input.trim();
+    } else if (dirPicked.value === 'pickAbsolute') {
+      const uris = await vscode.window.showOpenDialog({
+        canSelectFiles: false,
+        canSelectFolders: true,
+        canSelectMany: false,
+        openLabel: '确定',
+      });
+      if (!uris?.length) return;
+      finalDir = uris[0].fsPath;
+    }
+
+    await vscode.workspace.getConfiguration('otter').update(
+      'dailyLog.directory',
+      finalDir,
+      vscode.ConfigurationTarget.Global
+    );
+
+    const existingKeywords = this.configService.get<string[]>('dailyLog.endKeywords', ['结束', 'end', 'over']);
+    const keywordInput = await vscode.window.showInputBox({
+      title: '结束关键字',
+      prompt: '用于 @关键字 回车自动结束任务。英文按单词边界匹配（大小写不敏感）。用逗号分隔多个关键字。',
+      value: existingKeywords.join(','),
+      ignoreFocusOut: true,
+      validateInput: (v) => {
+        const parts = (v || '')
+          .split(/[,，]/)
+          .map((s) => s.trim())
+          .filter(Boolean);
+        if (!parts.length) return '至少需要一个关键字';
+        return undefined;
+      },
+    });
+    if (keywordInput === undefined) return;
+
+    const keywords = keywordInput
+      .split(/[,，]/)
+      .map((s) => s.trim())
+      .filter(Boolean);
+
+    await vscode.workspace.getConfiguration('otter').update(
+      'dailyLog.endKeywords',
+      keywords,
+      vscode.ConfigurationTarget.Global
+    );
+
+    const autoDetectCurrent = this.configService.get<boolean>('dailyLog.autoDetectOnEnter', true);
+    interface AutoDetectOption extends vscode.QuickPickItem {
+      value: boolean;
+    }
+
+    const autoDetectPicked = await vscode.window.showQuickPick<AutoDetectOption>(
+      [
+        {
+          label: '启用回车自动识别（推荐）',
+          description: '在任意 Markdown 输入 @end/@结束 后按 Enter 自动结束任务',
+          value: true,
+          picked: autoDetectCurrent === true,
+        },
+        {
+          label: '关闭回车自动识别',
+          description: '仅通过右键/命令/TreeView 结束任务',
+          value: false,
+          picked: autoDetectCurrent === false,
+        },
+      ],
+      { title: '回车自动识别', placeHolder: '是否启用回车自动识别？', ignoreFocusOut: true }
+    );
+    if (!autoDetectPicked) return;
+
+    await vscode.workspace.getConfiguration('otter').update(
+      'dailyLog.autoDetectOnEnter',
+      autoDetectPicked.value,
+      vscode.ConfigurationTarget.Global
+    );
+
+    // 让用户看到结果
+    void vscode.window.showInformationMessage(
+      `今日日志已配置：目录=${finalDir || '(Vault 根目录)'}，结束关键字=${keywords.join(',')}，回车识别=${autoDetectPicked.value ? '开启' : '关闭'}`
+    );
   }
 
   // ========== 步骤 4：Git 同步 ==========

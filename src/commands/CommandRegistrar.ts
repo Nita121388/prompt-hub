@@ -16,6 +16,8 @@ import { PromptUsageService } from '../services/PromptUsageService';
 import { BackupService, RestoreMode } from '../services/BackupService';
 import { enqueueByKey } from '../utils/WriteQueue';
 import { formatDateTime, renderTimeCommandLine } from '../utils/TimeCommand';
+import { DailyLogService } from '../services/DailyLogService';
+import { DailyTaskTreeProvider } from '../providers/DailyTaskTreeProvider';
 
 /**
  * 命令注册器：负责注册所有 Otter 相关命令并实现具体逻辑
@@ -47,7 +49,9 @@ export class CommandRegistrar {
     private readonly storageService: PromptStorageService,
     private readonly configService: ConfigurationService,
     private readonly treeProvider: PromptTreeProvider,
-    private readonly treeView?: vscode.TreeView<vscode.TreeItem>
+    private readonly treeView?: vscode.TreeView<vscode.TreeItem>,
+    private readonly dailyLogService?: DailyLogService,
+    private readonly dailyTaskProvider?: DailyTaskTreeProvider
   ) {}
 
   /** 注册所有命令 */
@@ -77,6 +81,14 @@ export class CommandRegistrar {
     this.register('otter.backupNow', () => this.backupNow());
     this.register('otter.restoreFromBackup', () => this.restoreFromBackup());
     this.register('otter.closeAllPromptEditors', () => this.closeAllPromptEditors());
+
+    // 今日日志任务计时
+    this.register('otter.dailyLog.record', () => this.dailyLogRecord());
+    this.register('otter.dailyLog.endPick', () => this.dailyLogEndPick());
+    this.register('otter.dailyLog.refreshTasks', () => this.dailyLogRefreshTasks());
+    this.register('otter.dailyLog.openTodayLog', () => this.dailyLogOpenTodayLog());
+    this.register('otter.dailyLog.endById', (id?: unknown) => this.dailyLogEndById(id));
+    this.register('otter.dailyLog.continueTask', (id?: unknown) => this.dailyLogContinueTask(id));
     this.register('otter.onPromptItemClick', (arg?: unknown) =>
       this.onPromptTreeItemClick(CommandRegistrar.extractPrompt(arg))
     );
@@ -1535,6 +1547,211 @@ export class CommandRegistrar {
 
     const doc = await vscode.workspace.openTextDocument({ language: 'markdown', content });
     await vscode.window.showTextDocument(doc, { preview: false });
+  }
+
+  // ===================== 今日日志任务计时（开始/结束） =====================
+
+  private ensureDailyLog(): { dailyLog: DailyLogService; dailyTaskProvider?: DailyTaskTreeProvider } {
+    if (!this.dailyLogService) {
+      throw new Error('DailyLogService 未初始化：请确认 extension.ts 已创建并注入。');
+    }
+    return { dailyLog: this.dailyLogService, dailyTaskProvider: this.dailyTaskProvider };
+  }
+
+  private async dailyLogRecord(): Promise<void> {
+    const { dailyLog, dailyTaskProvider } = this.ensureDailyLog();
+    const editor = vscode.window.activeTextEditor;
+    const now = new Date();
+
+    const selectionRaw = editor && !editor.selection.isEmpty ? editor.document.getText(editor.selection) : '';
+    const selectionRendered = selectionRaw ? dailyLog.renderTimeInSelection(selectionRaw, now) : '';
+
+    // 结束（文本触发）：选区包含“结束/end/over”等关键字
+    if (selectionRendered && dailyLog.selectionLooksLikeEnd(selectionRendered)) {
+      try {
+        const res = await dailyLog.endTaskByText(selectionRendered, now);
+
+        if (res.ended) {
+          dailyTaskProvider?.refresh();
+          void vscode.window.showInformationMessage(`已结束任务：${res.ended.title}`);
+          return;
+        }
+
+        const candidates = res.candidates ?? [];
+        if (!candidates.length) {
+          const action = await vscode.window.showWarningMessage(
+            '未匹配到可结束的运行中任务，是否将这段文本作为普通文本追加到今日日志？',
+            '追加',
+            '取消'
+          );
+          if (action === '追加') {
+            await dailyLog.appendPlainTextToTodayLog(selectionRendered, now);
+            dailyTaskProvider?.refresh();
+            void vscode.window.showInformationMessage('已追加到今日日志。');
+          }
+          return;
+        }
+
+        const picked = await vscode.window.showQuickPick(
+          candidates.map((t) => ({
+            label: t.title,
+            description: `开始：${formatDateTime(t.start, dailyLog.getTimeFormat())}`,
+            id: t.id,
+          })),
+          { placeHolder: '存在多个候选任务，请选择要结束的任务' }
+        );
+        if (!picked) return;
+
+        const ended = await dailyLog.endTaskById(picked.id, now);
+        dailyTaskProvider?.refresh();
+        if (ended) {
+          void vscode.window.showInformationMessage(`已结束任务：${ended.title}`);
+        } else {
+          void vscode.window.showWarningMessage('结束失败：未找到任务或任务已结束。');
+        }
+      } catch (err) {
+        await this.handleDailyLogError(err);
+      }
+      return;
+    }
+
+    // 开始：有选区则用首行作为标题；无选区则输入
+    try {
+      let title = '';
+      if (selectionRendered) {
+        title = this.deriveTitleFromSelection(selectionRendered);
+      } else {
+        const input = await vscode.window.showInputBox({
+          title: '记录到今日日志',
+          prompt: '请输入任务名称（将自动开始计时）',
+          validateInput: (v) => {
+            if (!v || !v.trim()) return '任务名称不能为空';
+            if (v.trim().length > 200) return '任务名称过长';
+            return undefined;
+          },
+        });
+        if (input === undefined) return;
+        title = input.trim();
+      }
+
+      if (!title) {
+        void vscode.window.showWarningMessage('未能从选区提取任务名称，请手动输入。');
+        const input = await vscode.window.showInputBox({
+          title: '记录到今日日志',
+          prompt: '请输入任务名称（将自动开始计时）',
+        });
+        if (input === undefined) return;
+        title = (input || '').trim();
+        if (!title) return;
+      }
+
+      await dailyLog.startTask({ title, now, rawSelection: selectionRendered });
+      dailyTaskProvider?.refresh();
+      void vscode.window.showInformationMessage(`已开始任务：${title}`);
+    } catch (err) {
+      await this.handleDailyLogError(err);
+    }
+  }
+
+  private async dailyLogEndPick(): Promise<void> {
+    const { dailyLog, dailyTaskProvider } = this.ensureDailyLog();
+    const now = new Date();
+    try {
+      const tasks = await dailyLog.listTodayTasks(now);
+      const running = tasks.filter((t) => !t.end);
+      if (!running.length) {
+        void vscode.window.showInformationMessage('今日没有运行中的任务。');
+        return;
+      }
+
+      const picked = await vscode.window.showQuickPick(
+        running.map((t) => ({
+          label: t.title,
+          description: `开始：${formatDateTime(t.start, dailyLog.getTimeFormat())}`,
+          id: t.id,
+        })),
+        { placeHolder: '请选择要结束的任务' }
+      );
+      if (!picked) return;
+
+      const ended = await dailyLog.endTaskById(picked.id, now);
+      dailyTaskProvider?.refresh();
+      if (ended) {
+        void vscode.window.showInformationMessage(`已结束任务：${ended.title}`);
+      }
+    } catch (err) {
+      await this.handleDailyLogError(err);
+    }
+  }
+
+  private async dailyLogEndById(id?: unknown): Promise<void> {
+    const { dailyLog, dailyTaskProvider } = this.ensureDailyLog();
+    const taskId = typeof id === 'string' ? id : undefined;
+    if (!taskId) return;
+
+    try {
+      const ended = await dailyLog.endTaskById(taskId, new Date());
+      dailyTaskProvider?.refresh();
+      if (ended) {
+        void vscode.window.showInformationMessage(`已结束任务：${ended.title}`);
+      }
+    } catch (err) {
+      await this.handleDailyLogError(err);
+    }
+  }
+
+  private async dailyLogContinueTask(id?: unknown): Promise<void> {
+    const { dailyLog, dailyTaskProvider } = this.ensureDailyLog();
+    const taskId = typeof id === 'string' ? id : undefined;
+    if (!taskId || !this.dailyTaskProvider) return;
+
+    try {
+      const task = await this.dailyTaskProvider.getTaskById(taskId);
+      if (!task) {
+        void vscode.window.showWarningMessage('未找到该任务。');
+        return;
+      }
+
+      const action = await vscode.window.showInformationMessage(
+        `该任务已完成：${task.title}\n是否继续任务？`,
+        '继续',
+        '取消'
+      );
+      if (action !== '继续') return;
+
+      const continuedTitle = dailyLog.makeContinueTitle(task.title);
+      await dailyLog.startTask({ title: continuedTitle, now: new Date() });
+      dailyTaskProvider?.refresh();
+      void vscode.window.showInformationMessage(`已继续任务：${continuedTitle}`);
+    } catch (err) {
+      await this.handleDailyLogError(err);
+    }
+  }
+
+  private dailyLogRefreshTasks(): void {
+    this.dailyTaskProvider?.refresh();
+  }
+
+  private async dailyLogOpenTodayLog(): Promise<void> {
+    const { dailyLog } = this.ensureDailyLog();
+    try {
+      const { dailyLogFile } = await dailyLog.ensureTodayLogExists(new Date());
+      const doc = await vscode.workspace.openTextDocument(vscode.Uri.file(dailyLogFile));
+      await vscode.window.showTextDocument(doc, { preview: false });
+    } catch (err) {
+      await this.handleDailyLogError(err);
+    }
+  }
+
+  private async handleDailyLogError(err: unknown): Promise<void> {
+    const message = err instanceof Error ? err.message : String(err);
+    const action = await vscode.window.showErrorMessage(
+      `今日日志操作失败：${message}`,
+      '打开设置'
+    );
+    if (action === '打开设置') {
+      await vscode.commands.executeCommand('workbench.action.openSettings', 'otter.dailyLog');
+    }
   }
 
   /** 确保有一个 Prompt 被选中，没有传入时弹出列表让用户选择 */

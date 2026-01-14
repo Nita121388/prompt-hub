@@ -524,6 +524,55 @@ ${content.substring(0, 2000)}`;
   }
 
   /**
+   * 通用对话：用于“今日总结”等场景
+   */
+  async chat(systemPrompt: string, userContent: string): Promise<string> {
+    const LOG_PREFIX = '[LocalCodexProvider] chat';
+    const timeoutMs = this.config.get<number>('local.codexTimeoutMs', 10000);
+    try {
+      logger.debug(`${LOG_PREFIX} 开始执行`);
+
+      const invocation = await this.getCodexInvocation();
+      if (!invocation) {
+        const err = '未找到 Codex CLI';
+        logger.error(`${LOG_PREFIX} ${err}`);
+        throw new Error(err);
+      }
+
+      const model = this.config.get<string>('local.codexModel', '').trim();
+      const prompt = `${systemPrompt || ''}\n\n${userContent || ''}`.trim();
+
+      const { stdout, stderr } = await this.runCodexCli(
+        invocation,
+        [
+          'exec',
+          '--skip-git-repo-check',
+          '--sandbox',
+          'read-only',
+          ...(model ? ['--model', model] : []),
+          prompt,
+        ],
+        timeoutMs
+      );
+
+      if (stderr) {
+        logger.warn(`${LOG_PREFIX} stderr`, stderr.slice(0, 500));
+      }
+
+      return stdout.trim();
+    } catch (error) {
+      const e = error as { message?: string; code?: unknown; signal?: unknown; killed?: unknown };
+      logger.error(`${LOG_PREFIX} 失败`, {
+        message: e?.message || String(error),
+        code: e?.code,
+        signal: e?.signal,
+        killed: e?.killed,
+      });
+      throw error;
+    }
+  }
+
+  /**
    * 获取 Codex CLI 路径
    * 优先级：配置 > 环境变量 > 自动检测
    */

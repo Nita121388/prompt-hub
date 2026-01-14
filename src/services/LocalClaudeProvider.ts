@@ -463,6 +463,35 @@ ${content.substring(0, 2000)}`;
   }
 
   /**
+   * 通用对话：用于“今日总结”等场景
+   */
+  async chat(systemPrompt: string, userContent: string): Promise<string> {
+    const LOG_PREFIX = '[LocalClaudeProvider] chat';
+    const timeoutMs = this.config.get<number>('local.claudeTimeoutMs', 120000);
+
+    const claudePath = await this.getClaudePath();
+    if (!claudePath) {
+      throw new Error(
+        '未找到 Claude Code CLI，请在设置中配置 otter.local.claudePath，或设置环境变量 CLAUDE_BIN，或确保 PATH 中可直接执行 claude'
+      );
+    }
+
+    const prompt = `${systemPrompt || ''}\n\n${userContent || ''}`.trim();
+    const args = ['-p', '--output-format', 'text', this.normalizePromptArg(prompt)];
+
+    logger.debug(`${LOG_PREFIX} 执行命令`);
+    logger.debug(`${LOG_PREFIX} 超时设置`, { timeoutMs });
+
+    const { stdout, stderr } = await this.runClaudeCli(claudePath, args, timeoutMs);
+
+    if (stderr) {
+      logger.warn(`${LOG_PREFIX} stderr`, stderr.slice(0, 500));
+    }
+
+    return stdout.trim();
+  }
+
+  /**
    * 获取 Claude Code CLI 路径
    * 优先级：配置 > 环境变量 > PATH > 常见目录
    */

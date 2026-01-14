@@ -69,7 +69,8 @@ export class MarkdownPromptParser {
     }
 
     // 必须以 --- 起始才视为 frontmatter
-    if (lines[0].trim() !== '---') {
+    const firstLine = (lines[0] || '').replace(/^\uFEFF/, '').trim();
+    if (firstLine !== '---') {
       return { frontmatter: '', body: text };
     }
 

@@ -221,7 +221,7 @@
 - `otter.markdown.mirrorDirectory`：镜像文件目录
 - `otter.markdown.filenameTemplate`：文件名模板
 - `otter.markdown.askForFilename`：创建时询问文件名
-- `otter.markdown.autoRenameOnSave`：保存时是否按标题自动重命名文件（可在 frontmatter 用 `rename: false` 禁用）
+- 保存时会按标题自动重命名文件（可在 frontmatter 用 `rename: false` 禁用）
 
 **Git 同步**：
 - `otter.git.enableSync`：启用 Git 同步功能
@@ -239,6 +239,14 @@
 **选区识别**：
 - `otter.selection.autoDetectPromptName`：自动识别 `# prompt:` 标记
 - `otter.selection.removePromptMarker`：移除标记行
+
+**Obsidian**：
+- `otter.obsidian.vaultPath`：Obsidian Vault 根目录（用于“创建到 Obsidian / 添加到 Obsidian 文件”）
+
+**时间命令**：
+- `otter.time.format`：默认时间格式（用于“插入时间”与渲染 `> @time`）
+- `otter.time.prefix`：插入时间时的前缀（例如 `- `）
+- `otter.time.autoRenderOnEnter`：按 Enter 换行时自动渲染上一行 `> @time ...`
 
 **UI 交互**：
 - `otter.ui.showEmojiPicker`：显示 emoji 选择器

@@ -341,19 +341,19 @@
   - 编辑器自动切换到新文件
 
 #### PH-074（P1 / 功能）frontmatter `rename: false` 时保存不应触发自动重命名
-- 前置条件：`otter.markdown.autoRenameOnSave=true`；某 `.md` 的 frontmatter 显式设置 `rename: false`
+- 前置条件：某 `.md` 的 frontmatter 显式设置 `rename: false`
 - 步骤：
   1. 修改该文件标题并保存
 - 预期结果：
   - 文件名保持不变
   - JSON 仍会更新 Prompt 的 name/emoji/content（仅不改文件名）
 
-#### PH-075（P1 / 功能）关闭 `markdown.autoRenameOnSave` 后保存不应自动重命名
-- 前置条件：`otter.markdown.autoRenameOnSave=false`
+#### PH-075（P1 / 兼容）用户残留配置 `otter.markdown.autoRenameOnSave=false` 时仍应自动重命名
+- 前置条件：用户/工作区 `settings.json` 中仍存在 `otter.markdown.autoRenameOnSave=false`（历史版本遗留）
 - 步骤：
   1. 修改存储目录内 `.md` 的标题并保存
 - 预期结果：
-  - 文件名保持不变
+  - 文件仍会按标题自动重命名（除非 frontmatter 显式 `rename: false`）
   - JSON 同步仍正常工作
 
 ### 3.9 Git 导入与同步（GitSyncService）
