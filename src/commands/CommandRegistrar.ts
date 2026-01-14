@@ -7,11 +7,15 @@ import { PromptTreeProvider } from '../providers/PromptTreeProvider';
 import { OnboardingWizard } from '../services/OnboardingWizard';
 import { SelectionParser } from '../utils/SelectionParser';
 import { Prompt } from '../types/Prompt';
-import { generateId, sanitizeFilename } from '../utils/helpers';
+import { formatDate, generateId, sanitizeFilename } from '../utils/helpers';
 import { PromptFileService } from '../services/PromptFileService';
 import { AIService } from '../services/AIService';
 import { GitSyncService } from '../services/GitSyncService';
 import { UsageLogService } from '../services/UsageLogService';
+import { PromptUsageService } from '../services/PromptUsageService';
+import { BackupService, RestoreMode } from '../services/BackupService';
+import { enqueueByKey } from '../utils/WriteQueue';
+import { formatDateTime, renderTimeCommandLine } from '../utils/TimeCommand';
 
 /**
  * 命令注册器：负责注册所有 Otter 相关命令并实现具体逻辑
@@ -51,6 +55,10 @@ export class CommandRegistrar {
     this.register('otter.createFromSelection', () => this.createFromSelection());
     this.register('otter.newPromptFile', () => this.newPromptFile());
     this.register('otter.searchPrompt', () => this.searchPrompt());
+    this.register('otter.insertTime', () => this.insertTime());
+    this.register('otter.renderTimeCommand', () => this.renderTimeCommand());
+    this.register('otter.obsidian.createFromSelection', () => this.createToObsidianFromSelection());
+    this.register('otter.obsidian.appendToFile', () => this.appendToObsidianFileFromSelection());
     this.register('otter.renamePromptFile', (context?: unknown) => this.renamePromptFile(context));
     this.register('otter.copyPromptContent', (context?: unknown) =>
       this.copyPromptContent(context)
@@ -59,12 +67,16 @@ export class CommandRegistrar {
     this.register('otter.refreshView', () => this.refreshView());
     this.register('otter.openSettings', () => this.openSettings());
     this.register('otter.openStorageFolder', () => this.openStorageFolder());
+    this.register('otter.openRemoteRepo', () => this.openRemoteRepo());
     this.register('otter.startOnboarding', () => this.startOnboarding());
     this.register('otter.resetOnboarding', () => this.resetOnboarding());
     this.register('otter.deletePrompt', (context?: unknown) => this.deletePrompt(context));
     this.register('otter.gitPull', () => this.gitPull());
     this.register('otter.gitSync', () => this.gitSync());
     this.register('otter.showQuickPick', () => this.showQuickPick());
+    this.register('otter.backupNow', () => this.backupNow());
+    this.register('otter.restoreFromBackup', () => this.restoreFromBackup());
+    this.register('otter.closeAllPromptEditors', () => this.closeAllPromptEditors());
     this.register('otter.onPromptItemClick', (arg?: unknown) =>
       this.onPromptTreeItemClick(CommandRegistrar.extractPrompt(arg))
     );
@@ -237,16 +249,262 @@ export class CommandRegistrar {
 
     await vscode.env.clipboard.writeText(prompt.content);
 
-    const usage = new UsageLogService(this.configService);
-    await usage.record({
-      id: generateId(),
-      timestamp: new Date().toISOString(),
-      operation: 'meta',
-      promptId: prompt.id,
-      status: 'success',
-    });
+    const usage = new PromptUsageService(this.configService);
+    await usage.increment(prompt.id);
+    this.treeProvider.refresh();
 
     void vscode.window.showInformationMessage(`已复制 Prompt「${prompt.name}」内容。`);
+  }
+
+  private async insertTime(): Promise<void> {
+    const editor = vscode.window.activeTextEditor;
+    if (!editor) {
+      void vscode.window.showWarningMessage('请先打开一个编辑器。');
+      return;
+    }
+
+    const format = this.configService.get<string>('time.format', 'YYYY-MM-DD HH:mm');
+    const prefix = this.configService.get<string>('time.prefix', '');
+    const text = `${prefix || ''}${formatDateTime(new Date(), format)}`;
+
+    await editor.edit((editBuilder) => {
+      for (const sel of editor.selections) {
+        editBuilder.replace(sel, text);
+      }
+    });
+  }
+
+  private async renderTimeCommand(): Promise<void> {
+    const editor = vscode.window.activeTextEditor;
+    if (!editor) {
+      void vscode.window.showWarningMessage('请先打开一个编辑器。');
+      return;
+    }
+
+    const doc = editor.document;
+    const defaultFormat = this.configService.get<string>('time.format', 'YYYY-MM-DD HH:mm');
+    const now = new Date();
+
+    const selections = editor.selections.length ? editor.selections : [editor.selection];
+    let changed = 0;
+
+    await editor.edit((editBuilder) => {
+      for (const sel of selections) {
+        const startLine = sel.start.line;
+        const endLine = sel.end.line;
+        for (let line = startLine; line <= endLine; line += 1) {
+          const text = doc.lineAt(line).text;
+          const rendered = renderTimeCommandLine(text, now, defaultFormat);
+          if (!rendered || rendered === text) continue;
+          changed += 1;
+          editBuilder.replace(doc.lineAt(line).range, rendered);
+        }
+      }
+    });
+
+    if (changed === 0) {
+      void vscode.window.showInformationMessage('未发现可渲染的 @time 命令行。');
+    } else {
+      void vscode.window.showInformationMessage(`已渲染 ${changed} 行时间命令。`);
+    }
+  }
+
+  private async createToObsidianFromSelection(): Promise<void> {
+    const editor = vscode.window.activeTextEditor;
+    if (!editor || editor.selection.isEmpty) {
+      void vscode.window.showWarningMessage('请先选中要写入 Obsidian 的文本片段。');
+      return;
+    }
+
+    const vaultPath = this.configService.get<string>('obsidian.vaultPath', '').trim();
+    if (!vaultPath) {
+      const action = await vscode.window.showWarningMessage(
+        '未配置 Obsidian Vault 路径：请先在设置中配置 otter.obsidian.vaultPath。',
+        '打开设置'
+      );
+      if (action === '打开设置') {
+        await vscode.commands.executeCommand(
+          'workbench.action.openSettings',
+          'otter.obsidian.vaultPath'
+        );
+      }
+      return;
+    }
+
+    const selectionRaw = editor.document.getText(editor.selection);
+    if (!selectionRaw.trim()) {
+      void vscode.window.showWarningMessage('选中文本为空，已取消。');
+      return;
+    }
+
+    const lastFolder = this.context.globalState.get<string>('otter.obsidian.lastFolder');
+    const defaultFolder = lastFolder && this.isInsideOrEqual(vaultPath, lastFolder) ? lastFolder : vaultPath;
+
+    const picked = await vscode.window.showOpenDialog({
+      title: '选择 Obsidian 目标文件夹',
+      openLabel: '选择文件夹',
+      canSelectFolders: true,
+      canSelectFiles: false,
+      canSelectMany: false,
+      defaultUri: vscode.Uri.file(defaultFolder),
+    });
+    if (!picked?.length) return;
+
+    const targetFolder = picked[0].fsPath;
+    if (!this.isInsideOrEqual(vaultPath, targetFolder)) {
+      void vscode.window.showErrorMessage('所选文件夹不在 Obsidian Vault 目录内，已取消。');
+      return;
+    }
+
+    await this.context.globalState.update('otter.obsidian.lastFolder', targetFolder);
+
+    const title = this.deriveTitleFromSelection(selectionRaw);
+    const timestamp = this.formatCompactTimestamp(new Date());
+    const suggestedName = sanitizeFilename(`${timestamp}-${title || '片段'}`) + '.md';
+
+    const filename = await vscode.window.showInputBox({
+      title: '输入新文件名',
+      prompt: '将在 Obsidian 中创建一个新的 Markdown 文件',
+      value: suggestedName,
+      validateInput: (v) => {
+        const trimmed = (v || '').trim();
+        if (!trimmed) return '文件名不能为空';
+        if (!trimmed.toLowerCase().endsWith('.md')) return '文件名必须以 .md 结尾';
+        if (trimmed.length > 120) return '文件名过长';
+        return undefined;
+      },
+    });
+    if (filename === undefined) return;
+
+    const finalName = filename.trim();
+    const desiredPath = path.join(targetFolder, finalName);
+    const uniquePath = await this.makeUniquePath(desiredPath);
+
+    const bodyTitle = title ? `# ${title}\n\n` : '';
+    const content = `${bodyTitle}${selectionRaw.trimEnd()}\n`;
+
+    await enqueueByKey(uniquePath, async () => {
+      await vscode.workspace.fs.writeFile(vscode.Uri.file(uniquePath), Buffer.from(content, 'utf8'));
+    });
+
+    const doc = await vscode.workspace.openTextDocument(vscode.Uri.file(uniquePath));
+    await vscode.window.showTextDocument(doc, { preview: false });
+    void vscode.window.showInformationMessage(`已创建 Obsidian 文件：${path.basename(uniquePath)}`);
+  }
+
+  private async appendToObsidianFileFromSelection(): Promise<void> {
+    const editor = vscode.window.activeTextEditor;
+    if (!editor || editor.selection.isEmpty) {
+      void vscode.window.showWarningMessage('请先选中要追加到 Obsidian 的文本片段。');
+      return;
+    }
+
+    const vaultPath = this.configService.get<string>('obsidian.vaultPath', '').trim();
+    if (!vaultPath) {
+      const action = await vscode.window.showWarningMessage(
+        '未配置 Obsidian Vault 路径：请先在设置中配置 otter.obsidian.vaultPath。',
+        '打开设置'
+      );
+      if (action === '打开设置') {
+        await vscode.commands.executeCommand(
+          'workbench.action.openSettings',
+          'otter.obsidian.vaultPath'
+        );
+      }
+      return;
+    }
+
+    const selectionRaw = editor.document.getText(editor.selection);
+    if (!selectionRaw.trim()) {
+      void vscode.window.showWarningMessage('选中文本为空，已取消。');
+      return;
+    }
+
+    const lastFile = this.context.globalState.get<string>('otter.obsidian.lastFile');
+    const defaultFile =
+      lastFile && this.isInsideOrEqual(vaultPath, lastFile) ? vscode.Uri.file(lastFile) : vscode.Uri.file(vaultPath);
+
+    const picked = await vscode.window.showOpenDialog({
+      title: '选择要追加的 Obsidian Markdown 文件',
+      openLabel: '选择文件',
+      canSelectFolders: false,
+      canSelectFiles: true,
+      canSelectMany: false,
+      defaultUri: defaultFile,
+      filters: { Markdown: ['md'] },
+    });
+    if (!picked?.length) return;
+
+    const targetFile = picked[0].fsPath;
+    if (!this.isInsideOrEqual(vaultPath, targetFile)) {
+      void vscode.window.showErrorMessage('所选文件不在 Obsidian Vault 目录内，已取消。');
+      return;
+    }
+
+    await this.context.globalState.update('otter.obsidian.lastFile', targetFile);
+
+    const now = new Date();
+    const timeLabel = `${formatDate(now)} ${now.toTimeString().slice(0, 5)}`;
+    const block = `\n\n## ${timeLabel}\n\n${selectionRaw.trimEnd()}\n`;
+
+    await enqueueByKey(targetFile, async () => {
+      const bin = await vscode.workspace.fs.readFile(vscode.Uri.file(targetFile));
+      const existing = Buffer.from(bin).toString('utf8');
+      const next = existing + block;
+      await vscode.workspace.fs.writeFile(vscode.Uri.file(targetFile), Buffer.from(next, 'utf8'));
+    });
+
+    const doc = await vscode.workspace.openTextDocument(vscode.Uri.file(targetFile));
+    await vscode.window.showTextDocument(doc, { preview: false });
+    void vscode.window.showInformationMessage(`已追加到 Obsidian 文件：${path.basename(targetFile)}`);
+  }
+
+  /** 打开 Prompt 存储仓库的远程主页（GitHub） */
+  private async openRemoteRepo(): Promise<void> {
+    const git = new GitSyncService(this.configService);
+
+    const remoteUrl =
+      ((await git.isGitRepo()) ? await git.tryGetOriginRemoteUrl() : null) ||
+      this.configService.get<string>('git.remoteUrl', '').trim();
+    if (!remoteUrl) {
+      void vscode.window.showWarningMessage('未检测到远程仓库地址：请先配置 Git 远端（origin 或 otter.git.remoteUrl）。');
+      return;
+    }
+
+    const webUrl = this.toRepoWebUrl(remoteUrl);
+    if (!webUrl) {
+      void vscode.window.showWarningMessage(`无法解析远程仓库地址：${remoteUrl}`);
+      return;
+    }
+
+    await vscode.env.openExternal(vscode.Uri.parse(webUrl));
+  }
+
+  private toRepoWebUrl(remoteUrl: string): string | null {
+    const raw = (remoteUrl || '').trim();
+    if (!raw) return null;
+
+    // SSH: git@github.com:owner/repo.git
+    const sshMatch = raw.match(/^git@([^:]+):(.+)$/);
+    if (sshMatch) {
+      const host = sshMatch[1];
+      const repoPath = sshMatch[2].replace(/\.git$/i, '').replace(/^\/+/, '');
+      return `https://${host}/${repoPath}`;
+    }
+
+    // HTTPS: https://github.com/owner/repo.git
+    try {
+      const u = new URL(raw);
+      if (!u.hostname) return null;
+      u.username = '';
+      u.password = '';
+      u.hash = '';
+      u.search = '';
+      u.pathname = u.pathname.replace(/\.git$/i, '').replace(/\/+$/, '');
+      return u.toString();
+    } catch {
+      return raw.replace(/\.git$/i, '');
+    }
   }
 
   /** 编辑 Prompt：打开源 Markdown 文件 */
@@ -400,8 +658,10 @@ export class CommandRegistrar {
     void vscode.window.showInformationMessage(`已删除 Prompt「${prompt.name}」。`);
   }
 
-  /** TreeView 单击/双击处理：单击复制，双击编辑 */
+  /** TreeView 单击/双击处理：单击复制，双击仅打开（不复制） */
   private lastClickInfo: { id?: string; time?: number } = {};
+  private pendingCopyTimer: NodeJS.Timeout | undefined;
+  private pendingCopyPromptId: string | undefined;
   private async onPromptTreeItemClick(prompt?: Prompt): Promise<void> {
     if (!prompt) return;
 
@@ -412,13 +672,31 @@ export class CommandRegistrar {
     this.lastClickInfo = { id: prompt.id, time: now };
 
     if (withinDoubleClick) {
-      // 双击：打开编辑
+      // 双击：取消单击复制，仅打开编辑（不复制、不计次数）
+      if (this.pendingCopyTimer) {
+        clearTimeout(this.pendingCopyTimer);
+        this.pendingCopyTimer = undefined;
+        this.pendingCopyPromptId = undefined;
+      }
       await this.editPrompt(prompt);
       return;
     }
 
-    // 单击：复制内容
-    await this.copyPromptContent(prompt);
+    // 单击：延迟触发复制；若在阈值内检测到双击则会取消
+    if (this.pendingCopyTimer) {
+      clearTimeout(this.pendingCopyTimer);
+      this.pendingCopyTimer = undefined;
+      this.pendingCopyPromptId = undefined;
+    }
+
+    this.pendingCopyPromptId = prompt.id;
+    this.pendingCopyTimer = setTimeout(() => {
+      // 仅在 pending 的仍是同一个 Prompt 时执行，避免快速切换点击导致“复制错对象”
+      if (this.pendingCopyPromptId !== prompt.id) return;
+      void this.copyPromptContent(prompt);
+      this.pendingCopyTimer = undefined;
+      this.pendingCopyPromptId = undefined;
+    }, 350);
   }
 
   /** AI 生成标题 / emoji */
@@ -860,6 +1138,21 @@ export class CommandRegistrar {
         action: 'refresh',
       },
       {
+        label: '💾 一键备份',
+        description: '创建 storagePath 快照备份（可选择目录）',
+        action: 'backup',
+      },
+      {
+        label: '♻️ 一键恢复',
+        description: '从备份目录恢复到 storagePath（可选择策略）',
+        action: 'restore',
+      },
+      {
+        label: '🧹 关闭所有已打开 Prompt',
+        description: '默认仅关闭已保存的 Prompt 文件，不影响其他文件',
+        action: 'closeAllPrompts',
+      },
+      {
         label: 'Git 拉取/导入',
         description: '新设备从远端仓库拉取到本地 storagePath',
         action: 'gitPull',
@@ -899,6 +1192,15 @@ export class CommandRegistrar {
       case 'refresh':
         await this.refreshView();
         break;
+      case 'backup':
+        await this.backupNow();
+        break;
+      case 'restore':
+        await this.restoreFromBackup();
+        break;
+      case 'closeAllPrompts':
+        await this.closeAllPromptEditors();
+        break;
       case 'gitPull':
         await this.gitPull();
         break;
@@ -914,6 +1216,325 @@ export class CommandRegistrar {
       default:
         break;
     }
+  }
+
+  private async backupNow(): Promise<void> {
+    const storagePath = this.configService.getStoragePath();
+    const backupService = new BackupService(this.configService);
+
+    const targetPick = await vscode.window.showQuickPick(
+      [
+        {
+          label: '使用默认目录（storagePath）',
+          description: `在 storagePath 下创建 ${'.otter-backup-YYYYMMDD-HHMMSS'} 备份目录`,
+          value: 'default',
+        },
+        {
+          label: '选择备份目录…',
+          description: '选择一个目录作为备份落点（仍会创建独立的 .otter-backup-* 子目录）',
+          value: 'pick',
+        },
+      ],
+      { placeHolder: '请选择备份目录' }
+    );
+    if (!targetPick) return;
+
+    let destinationRoot = storagePath;
+    if (targetPick.value === 'pick') {
+      const selected = await vscode.window.showOpenDialog({
+        canSelectFiles: false,
+        canSelectFolders: true,
+        canSelectMany: false,
+        openLabel: '选择备份目录',
+      });
+      if (!selected?.length) return;
+      destinationRoot = selected[0].fsPath;
+    }
+
+    const savePick = await vscode.window.showQuickPick(
+      [
+        { label: '先保存再备份（推荐）', description: '会保存所有已打开且未保存的文件', value: true },
+        { label: '不保存，直接备份', description: '可能备份不到尚未落盘的修改', value: false },
+      ],
+      { placeHolder: '备份前是否先保存？' }
+    );
+    if (!savePick) return;
+
+    if (savePick.value) {
+      await vscode.workspace.saveAll(false);
+    }
+
+    try {
+      const result = await backupService.createBackup({ destinationRoot });
+
+      const action = await vscode.window.showInformationMessage(
+        `备份完成：${result.backupDir}`,
+        '打开备份目录',
+        '复制路径',
+        '查看恢复说明'
+      );
+
+      if (action === '打开备份目录') {
+        await vscode.commands.executeCommand('revealFileInOS', vscode.Uri.file(result.backupDir));
+      } else if (action === '复制路径') {
+        await vscode.env.clipboard.writeText(result.backupDir);
+      } else if (action === '查看恢复说明') {
+        await this.openBackupRestoreGuide(result.backupDir);
+      }
+
+      if (result.warnings.length > 0) {
+        console.warn('[Backup] warnings:', result.warnings);
+      }
+    } catch (err) {
+      void vscode.window.showErrorMessage(
+        `备份失败：${err instanceof Error ? err.message : String(err)}`
+      );
+    }
+  }
+
+  private async restoreFromBackup(): Promise<void> {
+    const storagePath = this.configService.getStoragePath();
+    const backupService = new BackupService(this.configService);
+
+    const sourcePick = await vscode.window.showQuickPick(
+      [
+        {
+          label: '从默认备份目录选择',
+          description: `在 ${storagePath} 下查找 .otter-backup-*`,
+          value: 'default',
+        },
+        { label: '手动选择备份目录…', description: '选择一个具体的 .otter-backup-* 目录', value: 'pick' },
+      ],
+      { placeHolder: '请选择备份来源' }
+    );
+    if (!sourcePick) return;
+
+    let backupDir: string | undefined;
+    if (sourcePick.value === 'default') {
+      const backups = await backupService.listBackups(storagePath);
+      if (!backups.length) {
+        void vscode.window.showInformationMessage('未在默认目录找到任何备份（.otter-backup-*）。');
+        return;
+      }
+
+      const picked = await vscode.window.showQuickPick(
+        backups.map((p) => ({
+          label: path.basename(p),
+          description: p,
+          value: p,
+        })),
+        { placeHolder: '请选择要恢复的备份' }
+      );
+      if (!picked) return;
+      backupDir = picked.value;
+    } else {
+      const selected = await vscode.window.showOpenDialog({
+        canSelectFiles: false,
+        canSelectFolders: true,
+        canSelectMany: false,
+        openLabel: '选择备份目录',
+      });
+      if (!selected?.length) return;
+      backupDir = selected[0].fsPath;
+    }
+
+    // 基础校验：至少应包含 prompts.json
+    try {
+      await vscode.workspace.fs.stat(vscode.Uri.file(path.join(backupDir, 'prompts.json')));
+    } catch {
+      void vscode.window.showErrorMessage(
+        `所选目录不像是有效备份：未找到 prompts.json（${backupDir}）`
+      );
+      return;
+    }
+
+    const modePick = await vscode.window.showQuickPick(
+      [
+        {
+          label: '完全覆盖（回滚到备份时状态）',
+          description: '会清空当前 storagePath（保留旧备份目录）并复制备份内容',
+          mode: 'overwrite' as const,
+        },
+        {
+          label: '仅恢复缺失（合并）',
+          description: '不覆盖现有文件，prompts.json 按 id 补齐缺失条目',
+          mode: 'merge' as const,
+        },
+      ],
+      { placeHolder: '请选择恢复策略' }
+    );
+    if (!modePick) return;
+    const mode: RestoreMode = modePick.mode;
+
+    const confirm = await vscode.window.showWarningMessage(
+      `确认从备份恢复到 storagePath？\n\n备份：${backupDir}\n目标：${storagePath}`,
+      { modal: true },
+      '继续'
+    );
+    if (confirm !== '继续') return;
+
+    const safetyPick = await vscode.window.showQuickPick(
+      [
+        { label: '恢复前先备份当前 storagePath（推荐）', value: true },
+        { label: '不备份，直接恢复', value: false },
+      ],
+      { placeHolder: '恢复前是否先备份当前数据？' }
+    );
+    if (!safetyPick) return;
+
+    try {
+      let safetyBackupDir: string | undefined;
+      if (safetyPick.value) {
+        const safety = await backupService.createBackup({
+          destinationRoot: storagePath,
+          nameSuffix: 'before-restore',
+        });
+        safetyBackupDir = safety.backupDir;
+      }
+
+      const result = await backupService.restoreFromBackup(backupDir, mode);
+      await this.storageService.refresh();
+      this.treeProvider.refresh();
+
+      const action = await vscode.window.showInformationMessage(
+        `恢复完成：${mode === 'overwrite' ? '已覆盖' : '已合并'}（复制 ${result.copiedFiles} 个文件，跳过 ${result.skippedFiles} 个）` +
+          (result.mergedPromptsAdded > 0 ? `，新增 Prompt ${result.mergedPromptsAdded} 条` : '') +
+          (safetyBackupDir ? `\n\n已自动备份当前数据：${safetyBackupDir}` : ''),
+        '查看恢复说明',
+        '打开 storagePath'
+      );
+
+      if (action === '查看恢复说明') {
+        await this.openBackupRestoreGuide(backupDir);
+      } else if (action === '打开 storagePath') {
+        await vscode.commands.executeCommand('revealFileInOS', vscode.Uri.file(storagePath));
+      }
+
+      if (result.warnings.length > 0) {
+        console.warn('[Restore] warnings:', result.warnings);
+      }
+    } catch (err) {
+      void vscode.window.showErrorMessage(
+        `恢复失败：${err instanceof Error ? err.message : String(err)}`
+      );
+    }
+  }
+
+  private async closeAllPromptEditors(): Promise<void> {
+    const storagePath = this.configService.getStoragePath();
+    const promptSourcePaths = new Set(
+      this.storageService
+        .list()
+        .map((p) => p.sourceFile)
+        .filter((p): p is string => !!p)
+        .map((p) => path.resolve(p))
+    );
+
+    const promptTabs: vscode.Tab[] = [];
+    let detected = 0;
+    let skippedDirty = 0;
+
+    for (const group of vscode.window.tabGroups.all) {
+      for (const tab of group.tabs) {
+        const uri = this.tryGetTabFileUri(tab);
+        if (!uri) continue;
+
+        const doc = vscode.workspace.textDocuments.find(
+          (d) => d.uri.toString() === uri.toString()
+        );
+
+        const fsPath = path.resolve(uri.fsPath);
+        const isPrompt =
+          promptSourcePaths.has(fsPath) || (doc ? this.isPromptMarkdownDocument(doc, storagePath) : false);
+        if (!isPrompt) continue;
+
+        detected += 1;
+        if (doc?.isDirty) {
+          skippedDirty += 1;
+          continue;
+        }
+
+        promptTabs.push(tab);
+      }
+    }
+
+    if (detected === 0) {
+      void vscode.window.showInformationMessage('当前没有已打开的 Prompt 文件。');
+      return;
+    }
+
+    if (promptTabs.length === 0) {
+      void vscode.window.showInformationMessage(
+        `检测到 ${detected} 个 Prompt 标签页，但都未保存，已按默认策略跳过。`
+      );
+      return;
+    }
+
+    await vscode.window.tabGroups.close(promptTabs, true);
+    void vscode.window.showInformationMessage(
+      `已关闭 ${promptTabs.length} 个 Prompt 标签页` +
+        (skippedDirty > 0 ? `（跳过未保存 ${skippedDirty} 个）` : '') +
+        '。'
+    );
+  }
+
+  private tryGetTabFileUri(tab: vscode.Tab): vscode.Uri | undefined {
+    const input = tab.input;
+    if (input instanceof vscode.TabInputText) return input.uri;
+    if (input instanceof vscode.TabInputTextDiff) return input.modified;
+    return undefined;
+  }
+
+  private isPromptMarkdownDocument(doc: vscode.TextDocument, storagePath: string): boolean {
+    if (doc.uri.scheme !== 'file') return false;
+    if (!doc.uri.fsPath.toLowerCase().endsWith('.md')) return false;
+    if (!this.isInsideOrEqual(storagePath, doc.uri.fsPath)) return false;
+
+    const head = doc.getText().slice(0, 4096);
+    const lines = head.split(/\r?\n/);
+    if (!lines.length) return false;
+    if (lines[0].trim() !== '---') return false;
+
+    for (let i = 1; i < Math.min(lines.length, 60); i += 1) {
+      const line = lines[i].trim();
+      if (line === '---') break;
+      const m = line.match(/^type\s*:\s*(.+)\s*$/i);
+      if (m) {
+        const v = m[1].trim().replace(/^['"]|['"]$/g, '');
+        return v === 'prompt';
+      }
+    }
+
+    return false;
+  }
+
+  private async openBackupRestoreGuide(backupDir: string): Promise<void> {
+    const storagePath = this.configService.getStoragePath();
+    const content = [
+      '# Otter 备份与恢复说明',
+      '',
+      `- 当前 storagePath：\`${storagePath}\``,
+      `- 备份目录：\`${backupDir}\``,
+      '',
+      '## 一键恢复（推荐）',
+      '- 命令：`Otter: 一键恢复（从备份恢复）`（对应命令 ID：`otter.restoreFromBackup`）',
+      '- 你可以选择两种策略：',
+      '  - 完全覆盖：回滚到备份时状态（会清空当前 storagePath，但会保留旧备份目录）',
+      '  - 合并恢复：仅补齐缺失文件，`prompts.json` 按 `id` 补齐缺失 Prompt（不覆盖现有文件）',
+      '',
+      '## 手动恢复（保守做法）',
+      '1. 先把当前 storagePath 目录改名留存（例如加上 `.bak` 后缀）',
+      '2. 将备份目录中的所有内容复制回 storagePath',
+      '3. 回到 VS Code 执行 `Otter: 刷新列表`，或重载窗口',
+      '',
+      '## 备份目录说明',
+      '- 默认会在 storagePath 下创建：`.otter-backup-YYYYMMDD-HHMMSS`',
+      '- 备份会包含 storagePath 下的所有文件与子目录（会跳过已有的 `.otter-backup-*`，避免递归备份）',
+      '',
+    ].join('\n');
+
+    const doc = await vscode.workspace.openTextDocument({ language: 'markdown', content });
+    await vscode.window.showTextDocument(doc, { preview: false });
   }
 
   /** 确保有一个 Prompt 被选中，没有传入时弹出列表让用户选择 */
@@ -942,6 +1563,37 @@ export class CommandRegistrar {
   private isInside(root: string, target: string): boolean {
     const rel = path.relative(path.resolve(root), path.resolve(target));
     return !!rel && !rel.startsWith('..') && !path.isAbsolute(rel);
+  }
+
+  private isInsideOrEqual(root: string, target: string): boolean {
+    const rel = path.relative(path.resolve(root), path.resolve(target));
+    return rel === '' || (!rel.startsWith('..') && !path.isAbsolute(rel));
+  }
+
+  private deriveTitleFromSelection(text: string): string {
+    const firstLine = (text || '')
+      .split(/\r?\n/)
+      .map((l) => l.trim())
+      .find((l) => l.length > 0) || '';
+
+    return firstLine
+      .replace(/^#\s+/g, '')
+      .replace(/^>\s+/g, '')
+      .replace(/^[-*+]\s+/g, '')
+      .replace(/^\d+\.\s+/g, '')
+      .replace(/^#\s*prompt:\s*/i, '')
+      .trim()
+      .substring(0, 60);
+  }
+
+  private formatCompactTimestamp(date: Date): string {
+    const pad2 = (n: number) => String(n).padStart(2, '0');
+    return (
+      `${date.getFullYear()}` +
+      `${pad2(date.getMonth() + 1)}` +
+      `${pad2(date.getDate())}-` +
+      `${pad2(date.getHours())}${pad2(date.getMinutes())}${pad2(date.getSeconds())}`
+    );
   }
 
   /**

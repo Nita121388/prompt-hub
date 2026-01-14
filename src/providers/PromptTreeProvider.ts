@@ -2,7 +2,7 @@ import * as vscode from 'vscode';
 import { Prompt } from '../types/Prompt';
 import { PromptStorageService } from '../services/PromptStorageService';
 import { ConfigurationService } from '../services/ConfigurationService';
-import { UsageLogService } from '../services/UsageLogService';
+import { PromptUsageService } from '../services/PromptUsageService';
 import { logger } from '../services/Logger';
 
 /**
@@ -41,25 +41,17 @@ export class PromptTreeProvider implements vscode.TreeDataProvider<vscode.TreeIt
 
     // 获取排序方式
     const sortBy = this.configService.get<string>('ui.sortBy', 'recent');
+    const usageService = new PromptUsageService(this.configService);
+    let usageCount: Map<string, number> | undefined;
 
     // 按排序方式排序
     if (sortBy === 'usage') {
       // 按使用次数排序
-      const usageService = new UsageLogService(this.configService);
-      const logs = await usageService.readAll();
-      const usageCount = new Map<string, number>();
-
-      // 统计每个 Prompt 的使用次数
-      logs.forEach(log => {
-        if (log.promptId) {
-          usageCount.set(log.promptId, (usageCount.get(log.promptId) || 0) + 1);
-        }
-      });
-
+      usageCount = await usageService.getCountMap();
       // 排序：使用次数多的在前
       prompts.sort((a, b) => {
-        const countA = usageCount.get(a.id) || 0;
-        const countB = usageCount.get(b.id) || 0;
+        const countA = usageCount!.get(a.id) || 0;
+        const countB = usageCount!.get(b.id) || 0;
         return countB - countA;
       });
     } else if (sortBy === 'name') {
@@ -93,7 +85,10 @@ export class PromptTreeProvider implements vscode.TreeDataProvider<vscode.TreeIt
     if (element instanceof TagGroupTreeItem) {
       const tag = element.tag;
       const filtered = prompts.filter((p) => (p.tags && p.tags.length ? p.tags : ['未分组']).includes(tag));
-      return filtered.map((p) => new PromptTreeItem(p));
+      if (!usageCount) {
+        usageCount = await usageService.getCountMap();
+      }
+      return filtered.map((p) => new PromptTreeItem(p, usageCount!.get(p.id) || 0));
     }
 
     return [];
@@ -110,10 +105,14 @@ class TagGroupTreeItem extends vscode.TreeItem {
 
 /** 单个 Prompt 节点 */
 class PromptTreeItem extends vscode.TreeItem {
-  constructor(public readonly prompt: Prompt) {
+  constructor(
+    public readonly prompt: Prompt,
+    private readonly usageCount: number
+  ) {
     super(`${prompt.emoji ? prompt.emoji + ' ' : ''}${prompt.name}`, vscode.TreeItemCollapsibleState.None);
     this.tooltip = prompt.content.substring(0, 100);
-    this.description = prompt.sourceFile ? 'md' : undefined;
+    const usageText = `${this.usageCount} 次`;
+    this.description = prompt.sourceFile ? `md · ${usageText}` : usageText;
     this.contextValue = 'prompt';
     this.command = {
       command: 'otter.onPromptItemClick',

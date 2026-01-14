@@ -3,6 +3,8 @@
 .git/**
 .codepath/**
 .gitignore
+.env
+.env.*
 
 src/**
 out/test/**

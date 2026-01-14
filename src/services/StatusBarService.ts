@@ -19,7 +19,7 @@ export class StatusBarService {
     );
 
     // 设置图标和提示文字
-    this.statusBarItem.text = '📋';
+    this.statusBarItem.text = '🦦';
     this.statusBarItem.tooltip = 'Otter - 快速访问';
     this.statusBarItem.command = 'otter.showQuickPick';
 

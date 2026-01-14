@@ -115,8 +115,7 @@ export class MarkdownMirrorService {
     const emoji = parsed.emoji;
     console.log('[MarkdownMirrorService] 最终数据 - name:', name, ', emoji:', emoji, ', content长度:', content.length);
 
-    const autoRenameOnSave = this.config.get<boolean>('markdown.autoRenameOnSave', true);
-    const allowRename = autoRenameOnSave && parsed.rename !== false;
+    const allowRename = parsed.rename !== false;
 
     // 优先根据内嵌 ID 匹配；若 ID 不存在或未写入 JSON（历史版本/异常情况），再回退按 sourceFile 匹配
     const all = this.storage.list();

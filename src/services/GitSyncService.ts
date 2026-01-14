@@ -242,6 +242,17 @@ export class GitSyncService {
     return url || null;
   }
 
+  /**
+   * 非破坏性读取 origin remote（不会自动 git init）
+   * - 适用于“只想打开远程仓库主页”这类场景
+   */
+  async tryGetOriginRemoteUrl(): Promise<string | null> {
+    const result = await this.runGitAllowFailure(['remote', 'get-url', 'origin'], this.root);
+    if (result.code !== 0) return null;
+    const url = (result.stdout || result.stderr || '').trim();
+    return url || null;
+  }
+
   async setOriginRemoteUrl(remoteUrl: string): Promise<void> {
     await this.ensureRepo();
     const url = remoteUrl.trim();

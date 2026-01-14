@@ -2,7 +2,7 @@
   "name": "otter",
   "displayName": "Otter Prompt Desk",
   "description": "VSCode 插件，用于统一管理 Prompt，支持本地存储、Git 同步、AI 辅助生成，后续将扩展快速创建文件/目录与笔记时间戳同步。",
-  "version": "0.1.9",
+  "version": "0.1.17",
   "engines": {
     "vscode": "^1.85.0"
   },
@@ -54,6 +54,26 @@
         "category": "Otter"
       },
       {
+        "command": "otter.insertTime",
+        "title": "⏱️ 插入时间",
+        "category": "Otter"
+      },
+      {
+        "command": "otter.renderTimeCommand",
+        "title": "⏱️ 渲染时间命令（@time）",
+        "category": "Otter"
+      },
+      {
+        "command": "otter.obsidian.createFromSelection",
+        "title": "📝 创建到 Obsidian（选择文件夹）",
+        "category": "Otter"
+      },
+      {
+        "command": "otter.obsidian.appendToFile",
+        "title": "➕ 添加到 Obsidian 文件（选择文件）",
+        "category": "Otter"
+      },
+      {
         "command": "otter.renamePromptFile",
         "title": "📝 按标题重命名文件",
         "category": "Otter"
@@ -95,6 +115,12 @@
         "icon": "$(folder-opened)"
       },
       {
+        "command": "otter.openRemoteRepo",
+        "title": "🌐 打开远程仓库主页",
+        "category": "Otter",
+        "icon": "$(link-external)"
+      },
+      {
         "command": "otter.startOnboarding",
         "title": "🎯 配置向导",
         "category": "Otter"
@@ -131,6 +157,24 @@
         "title": "✨批量优化唤醒词",
         "category": "Otter",
         "icon": "$(sparkle)"
+      },
+      {
+        "command": "otter.backupNow",
+        "title": "💾 Otter: 一键备份（快照）",
+        "category": "Otter",
+        "icon": "$(archive)"
+      },
+      {
+        "command": "otter.restoreFromBackup",
+        "title": "♻️ Otter: 一键恢复（从备份恢复）",
+        "category": "Otter",
+        "icon": "$(history)"
+      },
+      {
+        "command": "otter.closeAllPromptEditors",
+        "title": "🧹 Otter: 关闭所有已打开 Prompt",
+        "category": "Otter",
+        "icon": "$(close-all)"
       }
     ],
     "submenus": [
@@ -144,7 +188,7 @@
         {
           "id": "otter",
           "title": "Otter",
-          "icon": "resources/icon.svg"
+          "icon": "resources/icon.png"
         }
       ]
     },
@@ -174,6 +218,16 @@
           "command": "otter.searchPrompt",
           "when": "editorHasSelection",
           "group": "1_prompts@2"
+        },
+        {
+          "command": "otter.obsidian.createFromSelection",
+          "when": "editorHasSelection",
+          "group": "2_obsidian@1"
+        },
+        {
+          "command": "otter.obsidian.appendToFile",
+          "when": "editorHasSelection",
+          "group": "2_obsidian@2"
         }
       ],
       "view/title": [
@@ -189,6 +243,11 @@
         },
         {
           "command": "otter.openStorageFolder",
+          "when": "view == otterView",
+          "group": "navigation"
+        },
+        {
+          "command": "otter.openRemoteRepo",
           "when": "view == otterView",
           "group": "navigation"
         },
@@ -265,6 +324,34 @@
     "configuration": {
       "title": "Otter",
       "properties": {
+        "otter.time.format": {
+          "type": "string",
+          "default": "YYYY-MM-DD HH:mm",
+          "description": "插入时间/渲染 @time 时使用的默认格式。",
+          "markdownDescription": "插入时间/渲染 `> @time` 时使用的默认格式。\n\n支持占位符：\n- `YYYY`：年\n- `MM`：月（补零）\n- `DD`：日（补零）\n- `HH`：小时（24h，补零）\n- `mm`：分钟（补零）\n- `ss`：秒（补零）\n\n示例：`YYYY-MM-DD HH:mm`、`HH:mm`",
+          "order": 55
+        },
+        "otter.time.prefix": {
+          "type": "string",
+          "default": "",
+          "description": "命令“插入时间”写入到光标处的前缀（例如 \"- \"）。",
+          "markdownDescription": "命令“插入时间”写入到光标处的前缀。\n\n示例：设置为 `- ` 后，会插入形如 `- 2026-01-13 12:34` 的文本。",
+          "order": 55.1
+        },
+        "otter.time.autoRenderOnEnter": {
+          "type": "boolean",
+          "default": true,
+          "description": "在 Markdown 中输入完一行 `> @time ...` 后按 Enter 换行时，自动将上一行渲染为时间文本。",
+          "markdownDescription": "在 Markdown 中输入完一行 `> @time ...` 后按 Enter 换行时，自动将上一行渲染为时间文本。\n\n示例：\n- 输入：`> @time format=HH:mm TODO`\n- 按 Enter 后自动变为：`> 13:45 TODO`",
+          "order": 55.2
+        },
+        "otter.obsidian.vaultPath": {
+          "type": "string",
+          "default": "",
+          "description": "Obsidian Vault 根目录路径（用于“创建到 Obsidian / 添加到 Obsidian 文件”）。",
+          "markdownDescription": "Obsidian Vault 根目录路径。\n\n用于编辑器右键：\n- “创建到 Obsidian（选择文件夹）”\n- “添加到 Obsidian 文件（选择文件）”\n\n示例（Windows）：`E:\\\\File\\\\NitaFile\\\\Obsidian\\\\Obsidian`\n\n提示：该功能仅做文件系统写入，不依赖 Obsidian 是否运行。",
+          "order": 0.5
+        },
         "otter.storagePath": {
           "type": "string",
           "default": "~/.otter",
@@ -292,13 +379,6 @@
           "description": "创建 Markdown Prompt 时是否弹窗询问文件名（关闭则直接使用文件名模板）。",
           "markdownDescription": "创建 Markdown Prompt 时是否弹窗询问文件名。\n\n- `true`：每次创建都会让你确认/修改文件名\n- `false`：直接按 `otter.markdown.filenameTemplate` 生成文件名",
           "order": 12
-        },
-        "otter.markdown.autoRenameOnSave": {
-          "type": "boolean",
-          "default": true,
-          "description": "保存存储目录内的 Markdown 时，是否按标题自动重命名文件（可在 frontmatter 用 rename: false 禁用）。",
-          "markdownDescription": "保存存储目录内的 Markdown 文件时，是否根据标题（如 `# 😀 标题`）自动重命名文件。\n\n- 仅对 `otter.storagePath` 目录下的 `.md` 文件生效\n- 可在单个文件的 frontmatter 中设置 `rename: false` 禁用自动重命名\n\n提示：启用后，保存可能触发“文件重命名”，在 Git 中会表现为 rename 变更。",
-          "order": 13
         },
         "otter.selection.autoDetectPromptName": {
           "type": "boolean",

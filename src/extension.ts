@@ -8,6 +8,7 @@ import { MarkdownMirrorService } from './services/MarkdownMirrorService';
 import { StatusBarService } from './services/StatusBarService';
 import { GitSyncService } from './services/GitSyncService';
 import { PromptSearchCodeActionProvider } from './providers/PromptSearchCodeActionProvider';
+import { TimeCommandService } from './services/TimeCommandService';
 import { logger } from './services/Logger';
 
 /**
@@ -89,6 +90,9 @@ export async function activate(context: vscode.ExtensionContext) {
     logger.debug('[Extension] MarkdownMirrorService 已创建');
     mirrorService.bindOnSave(context);
     mirrorService.bindOnStorageChange(context);
+
+    const timeCommandService = new TimeCommandService(configService);
+    timeCommandService.bindAutoRenderOnEnter(context);
 
     // 初始化状态栏
     const statusBarService = new StatusBarService(context, configService);

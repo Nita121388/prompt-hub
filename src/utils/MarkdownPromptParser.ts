@@ -122,7 +122,8 @@ export class MarkdownPromptParser {
 
     const lines = raw.split(/\r?\n/);
 
-    for (const line of lines) {
+    for (let i = 0; i < lines.length; i += 1) {
+      const line = lines[i];
       const trimmed = line.trim();
       if (!trimmed || trimmed.startsWith('#')) {
         continue;
@@ -153,6 +154,52 @@ export class MarkdownPromptParser {
         case 'tags':
           if (value) {
             result.tags = this.parseTags(value);
+            break;
+          }
+
+          // Obsidian 常见写法：
+          // tags:
+          //   - a
+          //   - b
+          //   - "c"
+          // 这里仅兼容字符串列表；遇到下一个字段（如 aliases:）时停止
+          {
+            const tags: string[] = [];
+            let j = i + 1;
+
+            for (; j < lines.length; j += 1) {
+              const nextLine = lines[j];
+              const nextTrimmed = nextLine.trim();
+
+              if (!nextTrimmed || nextTrimmed.startsWith('#')) {
+                continue;
+              }
+
+              const listItemMatch = nextLine.match(/^\s*-\s*(.+)$/);
+              if (!listItemMatch) {
+                break;
+              }
+
+              let item = listItemMatch[1].trim();
+              if (!item) continue;
+
+              // 简单处理未加引号的行内注释：- tag # comment
+              const firstChar = item[0];
+              const isQuoted = firstChar === '"' || firstChar === "'";
+              if (!isQuoted) {
+                item = item.split('#')[0].trim();
+              }
+
+              if (item) {
+                tags.push(this.stripQuotes(item));
+              }
+            }
+
+            if (tags.length) {
+              result.tags = tags;
+            }
+
+            i = j - 1;
           }
           break;
         case 'type':

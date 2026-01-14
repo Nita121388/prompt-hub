@@ -15,9 +15,10 @@ const LOG_PREFIX = '[OnboardingWizard]';
  * 步骤：
  * 1. 欢迎
  * 2. 存储路径
- * 3. Git 同步（可选，支持「上一步」）
- * 4. AI Provider（可选，支持「上一步」）
- * 5. 完成
+ * 3. Obsidian Vault（可选，支持「上一步」）
+ * 4. Git 同步（可选，支持「上一步」）
+ * 5. AI Provider（可选，支持「上一步」）
+ * 6. 完成
  */
 export class OnboardingWizard {
   private state: OnboardingState;
@@ -27,6 +28,7 @@ export class OnboardingWizard {
     private readonly configService: ConfigurationService
   ) {
     const configStoragePath = this.configService.get<string>('storagePath', '~/.otter');
+    const configObsidianVaultPath = this.configService.get<string>('obsidian.vaultPath', '').trim();
     const savedState =
       this.context.workspaceState.get<OnboardingState>('otter.onboardingState') ??
       this.context.workspaceState.get<OnboardingState>('promptHub.onboardingState');
@@ -34,6 +36,7 @@ export class OnboardingWizard {
     const defaults: OnboardingState = {
       step: 1,
       storagePath: configStoragePath,
+      obsidianVaultPath: configObsidianVaultPath || undefined,
       gitEnabled: false,
       gitRemoteUrl: undefined,
       aiProvider: undefined,
@@ -46,6 +49,7 @@ export class OnboardingWizard {
       ...defaults,
       ...(savedState ?? {}),
       storagePath: configStoragePath,
+      obsidianVaultPath: configObsidianVaultPath || undefined,
     };
 
     console.log(LOG_PREFIX, '构造函数初始化，state =', this.state);
@@ -69,9 +73,11 @@ export class OnboardingWizard {
   async reset(): Promise<void> {
     console.log(LOG_PREFIX, 'reset() 调用，重置引导状态');
     const configStoragePath = this.configService.get<string>('storagePath', '~/.otter');
+    const configObsidianVaultPath = this.configService.get<string>('obsidian.vaultPath', '').trim();
     this.state = {
       step: 1,
       storagePath: configStoragePath,
+      obsidianVaultPath: configObsidianVaultPath || undefined,
       gitEnabled: false,
       gitRemoteUrl: undefined,
       aiProvider: undefined,
@@ -93,6 +99,7 @@ export class OnboardingWizard {
       '',
       '我们将通过一个简短的向导帮你完成初始配置：',
       '  · 选择 Prompt 存储路径',
+      '  · 配置 Obsidian Vault 路径（可选）',
       '  · 是否启用 Git 同步',
       '  · 配置 AI Provider（可选）',
     ].join('\n');
@@ -129,6 +136,7 @@ export class OnboardingWizard {
       '',
       '我们将通过一个简短的向导帮你完成初始配置：',
       '  · 选择 Prompt 存储路径',
+      '  · 配置 Obsidian Vault 路径（可选）',
       '  · 是否启用 Git 同步',
       '  · 配置 AI Provider（可选）',
     ].join('\n');
@@ -161,7 +169,7 @@ export class OnboardingWizard {
     console.log(LOG_PREFIX, 'runFlow() 开始，当前 state =', this.state);
 
     try {
-      let currentStep: 2 | 3 | 4 | 5 = 2;
+      let currentStep: 2 | 3 | 4 | 5 | 6 = 2;
       let finished = false;
 
       // 当前存储路径（如果之前配置过就复用）
@@ -189,13 +197,37 @@ export class OnboardingWizard {
           console.log(LOG_PREFIX, '步骤 2 完成，storagePath =', storagePath);
           currentStep = 3;
         } else if (currentStep === 3) {
-          // 步骤 3：Git 同步
+          // 步骤 3：Obsidian Vault（可选）
+          const vaultResult = await this.configureObsidianVault();
+          console.log(LOG_PREFIX, 'configureObsidianVault 返回:', vaultResult);
+
+          if (vaultResult.type === 'back') {
+            currentStep = 2;
+            continue;
+          }
+
+          if (vaultResult.type === 'cancel') {
+            vscode.window.showWarningMessage('配置向导已取消，之前的配置保持不变。');
+            return;
+          }
+
+          if (vaultResult.type === 'next') {
+            this.state.obsidianVaultPath = vaultResult.vaultPath || undefined;
+          }
+
+          this.state.step = 3;
+          await this.saveState();
+
+          console.log(LOG_PREFIX, '步骤 3 完成，obsidianVaultPath =', this.state.obsidianVaultPath);
+          currentStep = 4;
+        } else if (currentStep === 4) {
+          // 步骤 4：Git 同步
           const result = await this.configureGit(storagePath);
           console.log(LOG_PREFIX, 'configureGit 返回:', result);
 
           if (result.type === 'back') {
-            // 返回上一步：存储路径
-            currentStep = 2;
+            // 返回上一步：Obsidian Vault
+            currentStep = 3;
             continue;
           }
 
@@ -223,24 +255,24 @@ export class OnboardingWizard {
             );
           }
 
-          this.state.step = 3;
+          this.state.step = 4;
           await this.saveState();
 
           console.log(
             LOG_PREFIX,
-            '步骤 3 完成，gitEnabled =',
+            '步骤 4 完成，gitEnabled =',
             this.state.gitEnabled,
             'gitRemoteUrl =',
             this.state.gitRemoteUrl
           );
-          currentStep = 4;
-        } else if (currentStep === 4) {
-          // 步骤 4：AI Provider
+          currentStep = 5;
+        } else if (currentStep === 5) {
+          // 步骤 5：AI Provider
           const aiResult = await this.configureAI();
           console.log(LOG_PREFIX, 'configureAI 返回:', aiResult);
 
           if (aiResult.type === 'back') {
-            currentStep = 3;
+            currentStep = 4;
             continue;
           }
 
@@ -252,35 +284,35 @@ export class OnboardingWizard {
             this.state.aiModel = aiResult.model;
           }
 
-          this.state.step = 4;
+          this.state.step = 5;
           await this.saveState();
 
-          console.log(LOG_PREFIX, '步骤 4 完成，aiProvider =', this.state.aiProvider);
+          console.log(LOG_PREFIX, '步骤 5 完成，aiProvider =', this.state.aiProvider);
 
           // 如果选择了 local-claude，且是 Windows，检查 Git Bash
           if (aiResult.type === 'next' && aiResult.provider === 'local-claude' && process.platform === 'win32') {
-            currentStep = 5;
+            currentStep = 6;
           } else {
             finished = true;
           }
         } else {
-          // 步骤 5：Git Bash 检测（仅 Windows + local-claude）
+          // 步骤 6：Git Bash 检测（仅 Windows + local-claude）
           const gitBashResult = await this.checkGitBash();
           console.log(LOG_PREFIX, 'checkGitBash 返回:', gitBashResult);
 
           if (gitBashResult.type === 'back') {
-            currentStep = 4;
+            currentStep = 5;
             continue;
           }
 
-          this.state.step = 5;
+          this.state.step = 6;
           await this.saveState();
 
           finished = true;
         }
       }
 
-      // 步骤 5：完成页（已自动保存，只显示摘要）
+      // 步骤 6：完成页（已自动保存，只显示摘要）
       console.log(LOG_PREFIX, '所有配置步骤完成，进入完成页');
       await this.showCompletion();
     } catch (error) {
@@ -353,7 +385,7 @@ export class OnboardingWizard {
 
     const selected = await vscode.window.showQuickPick(scenarios, {
       placeHolder: `当前路径：${resolvedPrevious}（可选择新的存储位置，或选择“保持当前路径”）`,
-      title: '步骤 2/4：存储路径配置',
+      title: '步骤 2/5：存储路径配置',
       ignoreFocusOut: true,
     });
 
@@ -444,7 +476,120 @@ export class OnboardingWizard {
     return { type: 'next', storagePath };
   }
 
-  // ========== 步骤 3：Git 同步 ==========
+  // ========== 步骤 3：Obsidian Vault（可选）==========
+
+  private async configureObsidianVault(): Promise<
+    | { type: 'next'; vaultPath?: string }
+    | { type: 'skip' }
+    | { type: 'back' }
+    | { type: 'cancel' }
+  > {
+    const current = this.configService.get<string>('obsidian.vaultPath', '').trim();
+    const resolvedCurrent = current ? this.resolvePath(current) : '';
+
+    interface VaultOption extends vscode.QuickPickItem {
+      value: 'keep' | 'select' | 'clear' | 'skip' | 'back';
+    }
+
+    const options: VaultOption[] = [];
+
+    if (current) {
+      options.push({
+        label: '$(check) 保持当前 Vault 路径',
+        description: resolvedCurrent,
+        value: 'keep',
+        picked: true,
+      });
+      options.push({
+        label: '$(folder-opened) 重新选择 Vault 路径',
+        description: '选择 Obsidian Vault 根目录（用于选区右键写入）',
+        value: 'select',
+      });
+      options.push({
+        label: '$(circle-slash) 清空 Vault 配置',
+        description: '关闭 Obsidian 写入能力（以后仍可再配置）',
+        value: 'clear',
+      });
+    } else {
+      options.push({
+        label: '$(folder-opened) 选择 Vault 路径',
+        description: '选择 Obsidian Vault 根目录（用于选区右键写入）',
+        value: 'select',
+        picked: true,
+      });
+    }
+
+    options.push({
+      label: '$(clock) 暂不配置',
+      description: '以后再说（不修改当前设置）',
+      value: 'skip',
+    });
+    options.push({
+      label: '$(arrow-left) 上一步（返回存储路径）',
+      value: 'back',
+    });
+
+    const selected = await vscode.window.showQuickPick(options, {
+      title: '步骤 3/5：Obsidian Vault 配置',
+      placeHolder: '配置 Obsidian Vault 根目录，用于“选区右键 → 创建/追加到 Obsidian”功能',
+      ignoreFocusOut: true,
+    });
+
+    if (!selected) {
+      return { type: 'skip' };
+    }
+
+    if (selected.value === 'back') return { type: 'back' };
+    if (selected.value === 'skip') return { type: 'skip' };
+
+    if (selected.value === 'keep') {
+      return { type: 'next', vaultPath: current };
+    }
+
+    if (selected.value === 'clear') {
+      await vscode.workspace.getConfiguration('otter').update(
+        'obsidian.vaultPath',
+        '',
+        vscode.ConfigurationTarget.Global
+      );
+      return { type: 'next', vaultPath: undefined };
+    }
+
+    const uris = await vscode.window.showOpenDialog({
+      canSelectFiles: false,
+      canSelectFolders: true,
+      canSelectMany: false,
+      openLabel: '确定',
+      defaultUri: resolvedCurrent ? vscode.Uri.file(resolvedCurrent) : undefined,
+    });
+
+    if (!uris || uris.length === 0) {
+      return { type: 'cancel' };
+    }
+
+    const picked = uris[0].fsPath;
+    if (!fs.existsSync(picked) || !fs.statSync(picked).isDirectory()) {
+      const retry = await vscode.window.showWarningMessage(
+        '所选路径不是有效的文件夹，请重新选择。',
+        '重新选择',
+        '取消'
+      );
+      if (retry === '重新选择') {
+        return this.configureObsidianVault();
+      }
+      return { type: 'cancel' };
+    }
+
+    await vscode.workspace.getConfiguration('otter').update(
+      'obsidian.vaultPath',
+      picked,
+      vscode.ConfigurationTarget.Global
+    );
+
+    return { type: 'next', vaultPath: picked };
+  }
+
+  // ========== 步骤 4：Git 同步 ==========
 
   /** 确保仓库至少有一个提交（如无则创建空提交） */
   private async ensureInitialCommit(dir: string): Promise<void> {
@@ -599,7 +744,7 @@ export class OnboardingWizard {
 
     const selected = await vscode.window.showQuickPick(options, {
       placeHolder: `${message}\n\n使用 ↑↓ 键选择一个选项，按回车确认；按 Esc 暂不配置 Git。`,
-      title: '步骤 3/4：Git 同步配置',
+      title: '步骤 4/5：Git 同步配置',
       ignoreFocusOut: true,
     });
 
@@ -999,7 +1144,7 @@ export class OnboardingWizard {
 
     const selected = await vscode.window.showQuickPick(providers, {
       placeHolder: '选择要使用的 AI 提供商（可跳过，稍后在设置中配置）',
-      title: '步骤 4/4：AI 配置',
+      title: '步骤 5/5：AI 配置',
       ignoreFocusOut: true,
     });
 
@@ -1116,7 +1261,7 @@ export class OnboardingWizard {
     };
   }
 
-  // ========== 步骤 5：Git Bash 检测（仅 Windows + local-claude）==========
+  // ========== 步骤 6：Git Bash 检测（仅 Windows + local-claude）==========
 
   private async checkGitBash(): Promise<{ type: 'next' } | { type: 'back' }> {
     console.log(LOG_PREFIX, 'checkGitBash() 开始检测 Git Bash');
@@ -1148,7 +1293,7 @@ export class OnboardingWizard {
 
       const selected = await vscode.window.showQuickPick(actions, {
         placeHolder: message,
-        title: '步骤 5/5：环境检测',
+        title: '步骤 6/6：环境检测',
         ignoreFocusOut: true,
       });
 
@@ -1187,7 +1332,7 @@ export class OnboardingWizard {
 
     const selected = await vscode.window.showQuickPick(actions, {
       placeHolder: message,
-      title: '步骤 5/5：环境检测',
+      title: '步骤 6/6：环境检测',
       ignoreFocusOut: true,
     });
 
@@ -1276,11 +1421,15 @@ export class OnboardingWizard {
 
   private async showCompletion(): Promise<void> {
     const resolvedStoragePath = this.resolvePath(this.state.storagePath || '~/.otter');
+    const resolvedVaultPath = this.state.obsidianVaultPath
+      ? this.resolvePath(this.state.obsidianVaultPath)
+      : '';
     const summaryLines = [
       '配置向导完成 🎉',
       '',
       '当前配置摘要：',
       `  · 存储路径：${resolvedStoragePath}`,
+      `  · Obsidian Vault：${resolvedVaultPath || '未配置'}`,
       `  · Git 同步：${this.state.gitEnabled ? '已启用' : '未启用'}`,
       `  · AI 配置：${
         this.state.aiProvider ? `${this.state.aiProvider} (${this.state.aiModel ?? ''})` : '未配置'
@@ -1344,8 +1493,9 @@ export class OnboardingWizard {
     }
 
     this.state = {
-      step: 5,
+      step: 6,
       storagePath: defaultPath,
+      obsidianVaultPath: this.configService.get<string>('obsidian.vaultPath', '').trim() || undefined,
       gitEnabled: false,
       gitRemoteUrl: undefined,
       aiProvider: undefined,

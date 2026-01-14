@@ -94,11 +94,14 @@ export interface ParsedPromptInfo {
  * 首次引导状态
  */
 export interface OnboardingState {
-  /** 当前步骤 (1-5) */
+  /** 当前步骤 (1-6) */
   step: number;
 
   /** 存储路径 */
   storagePath: string;
+
+  /** Obsidian Vault 根目录（可选） */
+  obsidianVaultPath?: string;
 
   /** 是否启用 Git */
   gitEnabled: boolean;

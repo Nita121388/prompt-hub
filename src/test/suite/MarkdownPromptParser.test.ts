@@ -98,4 +98,24 @@ suite('MarkdownPromptParser Test Suite', () => {
 
     assert.deepStrictEqual(result.tags, ['single-tag']);
   });
+
+  test('should parse tags from multiline list', () => {
+    const text = [
+      '---',
+      'id: t4',
+      'tags:',
+      '  - prompt',
+      '  - code/review',
+      '---',
+      '',
+      '# Title',
+      '',
+      'Content',
+      '',
+    ].join('\n');
+
+    const result = parser.parse(text);
+
+    assert.deepStrictEqual(result.tags, ['prompt', 'code/review']);
+  });
 });
