@@ -2,7 +2,7 @@
   "name": "otter",
   "displayName": "Otter Prompt Desk",
   "description": "VSCode 插件，用于统一管理 Prompt，支持本地存储、Git 同步、AI 辅助生成，后续将扩展快速创建文件/目录与笔记时间戳同步。",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "engines": {
     "vscode": "^1.85.0"
   },
