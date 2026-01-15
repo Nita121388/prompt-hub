@@ -62,6 +62,14 @@ export class ConfigurationService {
   }
 
   /**
+   * 解析路径变量（公共方法）
+   * - 支持: ~, ${workspaceFolder}, ${env:VAR}, $VAR, %VAR%
+   */
+  resolvePath(inputPath: string): string {
+    return this.resolvePathVariables(inputPath);
+  }
+
+  /**
    * 解析路径变量
    * 支持: ~, ${workspaceFolder}, ${env:VAR}
    */

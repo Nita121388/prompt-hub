@@ -13,6 +13,8 @@ import {
   normalizeForMatch,
 } from '../utils/DailyLogTaskParser';
 import { sanitizeFilename } from '../utils/helpers';
+import { stripStartEndDirectiveTokensFromLine } from '../utils/MarkdownQuickCommandDirectiveStripper';
+import { appendResultTag } from '../utils/MarkdownQuickCommandSummaryDirectiveStripper';
 
 type ActionKind = 'start' | 'end' | 'add' | 'new' | 'file' | 'folder';
 
@@ -62,7 +64,7 @@ export class MarkdownQuickCommandService {
     const timeFormat = this.config.get<string>('time.format', 'YYYY-MM-DD HH:mm');
 
     const edits: Array<{ line: number; next: string }> = [];
-    let pendingTodaySummary: { filename?: string } | null = null;
+    const pendingTodaySummaries: Array<{ line: number; filename?: string }> = [];
 
     for (const line of candidateLines) {
       if (line < 0 || line >= doc.lineCount) continue;
@@ -99,21 +101,34 @@ export class MarkdownQuickCommandService {
         continue;
       }
 
-      // 避免重复触发：若末尾已写入执行结果，跳过
-      if (/\(\s*(?:已开始|已追加|已新建|已总结|\d+h|\d+m|\d+s)/.test(rendered.trimEnd())) {
-        continue;
+      // 避免重复触发：若末尾已写入执行结果，通常跳过
+      // 但 @summary 的一致性需要保证：仅当已标记“已总结”才跳过；否则允许再次触发（例如用户上次取消了总结）。
+      const hasAnyResultMark = /\(\s*(?:已开始|已追加|已新建|已总结|\d+h|\d+m|\d+s)/.test(
+        rendered.trimEnd()
+      );
+      if (hasAnyResultMark) {
+        if (!hasTodaySummary) continue;
+        const alreadySummarized = /\(\s*[^)]*已总结[^)]*\)\s*$/u.test(rendered.trimEnd());
+        if (alreadySummarized) continue;
       }
 
       if (hasTodaySummary) {
-        pendingTodaySummary = { filename: parsed.summary?.filename };
+        pendingTodaySummaries.push({ line, filename: parsed.summary?.filename });
       }
 
       this.processingDocs.add(docKey);
       try {
         try {
-          const result = await this.executeActions(editor, doc, rendered, actions, parsed.summary, now);
-          if (result && result !== original) {
-            edits.push({ line, next: result });
+          if (actions.length) {
+            const result = await this.executeActions(editor, doc, rendered, actions, now);
+            if (result && result !== original) {
+              edits.push({ line, next: result });
+            }
+          } else {
+            // 仅 @summary/@today 等场景：仍允许改写 @time token
+            if (rendered !== original) {
+              edits.push({ line, next: rendered });
+            }
           }
         } catch (err) {
           const msg = err instanceof Error ? err.message : String(err);
@@ -124,7 +139,7 @@ export class MarkdownQuickCommandService {
       }
     }
 
-    if (!edits.length && !pendingTodaySummary) return;
+    if (!edits.length && !pendingTodaySummaries.length) return;
 
     this.processingDocs.add(docKey);
     try {
@@ -140,9 +155,11 @@ export class MarkdownQuickCommandService {
         );
       }
 
-      if (pendingTodaySummary) {
+      for (const s of pendingTodaySummaries) {
         try {
-          await this.summarizeToday(editor, doc, pendingTodaySummary.filename, now);
+          const ok = await this.summarizeToday(editor, doc, s.filename, now);
+          if (!ok) continue;
+          await this.markLineAsSummarized(editor, doc, s.line);
         } catch (err) {
           const msg = err instanceof Error ? err.message : String(err);
           void vscode.window.showErrorMessage(`生成今日总结失败：${msg}`);
@@ -369,7 +386,6 @@ export class MarkdownQuickCommandService {
     doc: vscode.TextDocument,
     renderedLine: string,
     actions: Array<{ kind: ActionKind; keys?: string[]; name?: string }>,
-    summary: ParsedActions['summary'],
     now: Date
   ): Promise<string | null> {
     // 冲突：同一行同时 start + end，弹窗让用户选择
@@ -505,12 +521,23 @@ export class MarkdownQuickCommandService {
       }
     }
 
-    if (summary?.isToday) {
-      results.push('已总结');
+    if (!results.length) return null;
+
+    const stripStart = ordered.some((a) => a.kind === 'start');
+    const stripEnd = ordered.some((a) => a.kind === 'end');
+    let displayLine = renderedLine;
+    if (stripStart || stripEnd) {
+      const startKeywords = this.config.get<string[]>('quickCmd.startKeywords', ['start', 'begin', '开始']);
+      const endKeywords = this.config.get<string[]>('quickCmd.endKeywords', ['end', 'over', 'stop', '结束']);
+      displayLine = stripStartEndDirectiveTokensFromLine(displayLine, {
+        stripStart,
+        stripEnd,
+        startKeywords,
+        endKeywords,
+      });
     }
 
-    if (!results.length) return null;
-    return `${renderedLine} (${results.join('; ')})`;
+    return `${displayLine} (${results.join('; ')})`;
   }
 
   private getVaultPath(): string {
@@ -734,12 +761,53 @@ export class MarkdownQuickCommandService {
     return this.config.get<boolean>('summary.showTemplatePreviewBeforeRun', true);
   }
 
+  private getSummaryTemplatePathRaw(): string {
+    return (this.config.get<string>('summary.templatePath', '') || '').trim();
+  }
+
+  private resolveMaybeVaultRelativePath(input: string): string {
+    const raw = (input || '').trim();
+    if (!raw) return raw;
+    const resolved = this.config.resolvePath(raw);
+    if (path.isAbsolute(resolved)) return resolved;
+    return this.resolveVaultRelative(resolved);
+  }
+
+  private async loadSummaryTemplate(): Promise<{
+    templateRaw: string;
+    source: 'path' | 'inline';
+    templatePath?: string;
+  }> {
+    const tplPathRaw = this.getSummaryTemplatePathRaw();
+    if (tplPathRaw) {
+      const fullPath = this.resolveMaybeVaultRelativePath(tplPathRaw);
+      const bin = await vscode.workspace.fs.readFile(vscode.Uri.file(fullPath));
+      return { templateRaw: Buffer.from(bin).toString('utf8'), source: 'path', templatePath: fullPath };
+    }
+    return { templateRaw: this.getSummaryTemplate(), source: 'inline' };
+  }
+
+  private async openSummaryTemplate(): Promise<void> {
+    const tplPathRaw = this.getSummaryTemplatePathRaw();
+    if (tplPathRaw) {
+      const fullPath = this.resolveMaybeVaultRelativePath(tplPathRaw);
+      const doc = await vscode.workspace.openTextDocument(vscode.Uri.file(fullPath));
+      await vscode.window.showTextDocument(doc, { preview: false });
+      return;
+    }
+
+    // 未配置文件路径时：打开一个临时文档供查看/复制
+    const content = this.getSummaryTemplate();
+    const doc = await vscode.workspace.openTextDocument({ language: 'markdown', content });
+    await vscode.window.showTextDocument(doc, { preview: false });
+  }
+
   private async summarizeToday(
     editor: vscode.TextEditor,
     doc: vscode.TextDocument,
     filenameOrKey: string | undefined,
     now: Date
-  ): Promise<void> {
+  ): Promise<boolean> {
     const date = formatDateTime(now, 'YYYY-MM-DD');
 
     const target = (filenameOrKey || '').trim();
@@ -749,12 +817,13 @@ export class MarkdownQuickCommandService {
       '生成',
       '取消'
     );
-    if (action !== '生成') return;
+    if (action !== '生成') return false;
 
     const timedTasksMarkdown = await this.buildTodayTimedTasksMarkdown(now);
 
     const draftFile = path.basename(doc.fileName || 'draft.md');
-    const templateRaw = this.getSummaryTemplate();
+    const loaded = await this.loadSummaryTemplate();
+    const templateRaw = loaded.templateRaw;
     const templateFilled = replaceSummaryPlaceholders(templateRaw, {
       date,
       draftFile,
@@ -766,13 +835,19 @@ export class MarkdownQuickCommandService {
       const picked = await vscode.window.showInformationMessage(
         `将使用总结模板（前 18 行预览）：\n${preview}`,
         '继续',
+        '打开模板',
         '打开设置',
         '取消'
       );
-      if (!picked || picked === '取消') return;
+      if (!picked || picked === '取消') return false;
+      if (picked === '打开模板') {
+        await this.openSummaryTemplate();
+        return false;
+      }
       if (picked === '打开设置') {
-        await vscode.commands.executeCommand('workbench.action.openSettings', 'otter.summary.template');
-        return;
+        const key = this.getSummaryTemplatePathRaw() ? 'otter.summary.templatePath' : 'otter.summary.template';
+        await vscode.commands.executeCommand('workbench.action.openSettings', key);
+        return false;
       }
     }
 
@@ -823,12 +898,74 @@ export class MarkdownQuickCommandService {
     if (!target) {
       await this.upsertSummaryIntoCurrentDocument(editor, doc, date, block);
       void vscode.window.showInformationMessage('已将今日总结写入当前文件。');
-      return;
+      return true;
     }
 
     const targetFile = await this.resolveSummaryTargetFile(target);
     await this.upsertSummaryIntoFile(targetFile, date, block);
     void vscode.window.showInformationMessage(`已将今日总结写入：${path.basename(targetFile)}`);
+    return true;
+  }
+
+  private async markLineAsSummarized(
+    editor: vscode.TextEditor,
+    doc: vscode.TextDocument,
+    preferredLineIndex: number
+  ): Promise<void> {
+    const summaryKeywords = this.config.get<string[]>('quickCmd.summaryKeywords', ['summary', '总结']);
+
+    const matchSummary = (lineText: string): boolean => {
+      const tokens = (lineText || '').trim().split(/\s+/).filter(Boolean);
+      for (const t of tokens) {
+        if (!t.startsWith('@')) continue;
+        const base = t.match(/^@[^:(\s]+/)?.[0] || t;
+        const normalized = base.slice(1);
+        const ok = (summaryKeywords || []).some((k0) => {
+          const k = (k0 || '').trim();
+          if (!k) return false;
+          if (/^[A-Za-z0-9_]+$/.test(k)) return k.toLowerCase() === normalized.toLowerCase();
+          return k === normalized;
+        });
+        if (ok) return true;
+      }
+      return false;
+    };
+
+    const lineCount = doc.lineCount;
+    if (!lineCount) return;
+
+    let chosen = -1;
+    if (preferredLineIndex >= 0 && preferredLineIndex < lineCount) {
+      const text = doc.lineAt(preferredLineIndex).text;
+      if (matchSummary(text)) chosen = preferredLineIndex;
+    }
+
+    if (chosen < 0) {
+      let bestDist = Number.POSITIVE_INFINITY;
+      for (let i = 0; i < lineCount; i += 1) {
+        const text = doc.lineAt(i).text;
+        if (!matchSummary(text)) continue;
+        const dist = Math.abs(i - preferredLineIndex);
+        if (dist < bestDist) {
+          bestDist = dist;
+          chosen = i;
+        }
+      }
+    }
+
+    if (chosen < 0) return;
+
+    const current = doc.lineAt(chosen).text;
+    const next = appendResultTag(current, '已总结');
+    if (next === current) return;
+
+    await editor.edit(
+      (eb) => {
+        if (chosen < 0 || chosen >= doc.lineCount) return;
+        eb.replace(doc.lineAt(chosen).range, next);
+      },
+      { undoStopBefore: false, undoStopAfter: false }
+    );
   }
 
   private async upsertSummaryIntoCurrentDocument(

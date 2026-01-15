@@ -89,6 +89,7 @@ export class CommandRegistrar {
     this.register('otter.dailyLog.openTodayLog', () => this.dailyLogOpenTodayLog());
     this.register('otter.dailyLog.endById', (id?: unknown) => this.dailyLogEndById(id));
     this.register('otter.dailyLog.continueTask', (id?: unknown) => this.dailyLogContinueTask(id));
+    this.register('otter.dailyLog.appendSelectionToTask', () => this.dailyLogAppendSelectionToTask());
     this.register('otter.onPromptItemClick', (arg?: unknown) =>
       this.onPromptTreeItemClick(CommandRegistrar.extractPrompt(arg))
     );
@@ -1723,6 +1724,82 @@ export class CommandRegistrar {
       await dailyLog.startTask({ title: continuedTitle, now: new Date() });
       dailyTaskProvider?.refresh();
       void vscode.window.showInformationMessage(`已继续任务：${continuedTitle}`);
+    } catch (err) {
+      await this.handleDailyLogError(err);
+    }
+  }
+
+  private async dailyLogAppendSelectionToTask(): Promise<void> {
+    const { dailyLog, dailyTaskProvider } = this.ensureDailyLog();
+    const editor = vscode.window.activeTextEditor;
+    if (!editor) {
+      void vscode.window.showWarningMessage('请先打开一个编辑器。');
+      return;
+    }
+
+    const selectionText = editor.selections
+      .filter((s) => !s.isEmpty)
+      .map((s) => editor.document.getText(s))
+      .join('\n\n')
+      .trimEnd();
+    if (!selectionText.trim()) {
+      void vscode.window.showWarningMessage('请选择要补充到任务的文本。');
+      return;
+    }
+
+    const now = new Date();
+    try {
+      const tasks = await dailyLog.listTodayTasks(now);
+      if (!tasks.length) {
+        void vscode.window.showWarningMessage('今日暂无任务：请先开始一个任务后再补充。');
+        return;
+      }
+
+      const running = tasks.filter((t) => !t.end);
+
+      let targetId: string | undefined;
+      let targetTitle: string | undefined;
+
+      if (running.length === 1) {
+        targetId = running[0].id;
+        targetTitle = running[0].title;
+      } else {
+        const items = [
+          ...running.map((t) => ({
+            label: `🕐 ${t.title}`,
+            description: `开始：${formatDateTime(t.start, dailyLog.getTimeFormat())}`,
+            id: t.id,
+          })),
+          ...tasks
+            .filter((t) => !!t.end)
+            .map((t) => ({
+              label: `✓ ${t.title}`,
+              description: `开始：${formatDateTime(t.start, dailyLog.getTimeFormat())}`,
+              id: t.id,
+            })),
+        ];
+
+        const picked = await vscode.window.showQuickPick(items, {
+          placeHolder: running.length ? '请选择要补充的任务（优先显示运行中任务）' : '请选择要补充的任务',
+          matchOnDescription: true,
+        });
+        if (!picked) return;
+        targetId = picked.id;
+        targetTitle = picked.label.replace(/^(\s*🕐\s*|\s*✓\s*)/u, '').trim();
+      }
+
+      if (!targetId) return;
+
+      await dailyLog.appendToTaskById(targetId, selectionText, now);
+      dailyTaskProvider?.refresh();
+
+      const action = await vscode.window.showInformationMessage(
+        `已补充到任务：${targetTitle ?? targetId}`,
+        '打开今日日志'
+      );
+      if (action === '打开今日日志') {
+        await vscode.commands.executeCommand('otter.dailyLog.openTodayLog');
+      }
     } catch (err) {
       await this.handleDailyLogError(err);
     }

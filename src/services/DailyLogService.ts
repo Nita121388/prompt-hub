@@ -13,6 +13,7 @@ import {
   fuzzyPickTaskByTitle,
   parseDailyLog,
 } from '../utils/DailyLogTaskParser';
+import { appendSupplementToTaskBlock } from '../utils/DailyLogTaskSupplement';
 
 export type EndMode = 'byId' | 'byText';
 
@@ -294,6 +295,26 @@ export class DailyLogService {
     }
 
     return { candidates: picked, candidateTitle };
+  }
+
+  /**
+   * 将一段文本“补充到任务”下方：
+   * - 会写入到任务开始标题块内（含 task id 的标题行后面的块）
+   * - 若不存在“#### 补充”小节，会自动创建
+   * - 内容以 ```text 代码块原样追加，避免破坏 Markdown
+   */
+  async appendToTaskById(taskId: string, text: string, now = new Date()): Promise<void> {
+    const { paths } = await this.readTodayLog(now);
+
+    await enqueueByKey(paths.dailyLogFile, async () => {
+      const bin = await vscode.workspace.fs.readFile(vscode.Uri.file(paths.dailyLogFile));
+      const current = Buffer.from(bin).toString('utf8');
+      const nextText = appendSupplementToTaskBlock(current, taskId, text);
+      await vscode.workspace.fs.writeFile(
+        vscode.Uri.file(paths.dailyLogFile),
+        Buffer.from(nextText, 'utf8')
+      );
+    });
   }
 
   async appendPlainTextToTodayLog(text: string, now = new Date()): Promise<void> {

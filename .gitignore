@@ -42,6 +42,7 @@ AI功能详细说明.md
 
 # 本地调试/实现过程文档（默认放在 notes/；如需发布请移至 docs/ 并经人工整理）
 docs/LOCAL_AI_IMPLEMENTATION_SUMMARY.md
+docs/summary-*.md
 
 # 本地临时测试脚本
 test-claude-codex.js

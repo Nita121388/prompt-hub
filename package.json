@@ -184,6 +184,12 @@
         "icon": "$(clock)"
       },
       {
+        "command": "otter.dailyLog.appendSelectionToTask",
+        "title": "➕ Otter: 补充到任务（选区）",
+        "category": "Otter",
+        "icon": "$(add)"
+      },
+      {
         "command": "otter.dailyLog.endPick",
         "title": "⏹️ Otter: 结束任务（选择运行中任务）",
         "category": "Otter",
@@ -262,6 +268,11 @@
           "command": "otter.dailyLog.record",
           "when": "editorTextFocus",
           "group": "2_obsidian@3"
+        },
+        {
+          "command": "otter.dailyLog.appendSelectionToTask",
+          "when": "editorHasSelection",
+          "group": "2_obsidian@4"
         }
       ],
       "view/title": [
@@ -581,6 +592,13 @@
           "description": "AI 今日总结的模板（Markdown，多行）。支持 {date}/{draftFile}/{timedTasksTable}/{ai} 占位符。",
           "markdownDescription": "AI 今日总结模板（Markdown，多行）。\n\n支持占位符：\n- `{date}`：YYYY-MM-DD\n- `{draftFile}`：当前草稿文件名\n- `{timedTasksTable}`：今日日志计时任务表（含每项时长）\n- `{ai}`：AI 生成内容插入点（建议保留）\n\n示例：\n- `## {date} 今日总结`",
           "order": 0.752
+        },
+        "otter.summary.templatePath": {
+          "type": "string",
+          "default": "",
+          "description": "AI 今日总结模板文件路径（优先级高于 otter.summary.template）。支持绝对路径或 Vault 相对路径，支持 ~/${workspaceFolder}/${env:VAR} 等变量。",
+          "markdownDescription": "AI 今日总结模板文件路径（优先级高于 `otter.summary.template`）。\n\n- 绝对路径示例：`D:\\\\Templates\\\\summary.md`\n- Vault 相对路径示例：`Templates/summary.md`（基于 `otter.obsidian.vaultPath`）\n- 支持变量：`~`、`${workspaceFolder}`、`${env:VAR}`、`$VAR`、`%VAR%`\n\n提示：配置该项后，“@summary 预览/打开模板”会直接打开该文件。",
+          "order": 0.753
         },
         "otter.storagePath": {
           "type": "string",
