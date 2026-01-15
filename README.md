@@ -6,6 +6,20 @@
 [![VS Marketplace Installs](https://img.shields.io/visual-studio-marketplace/i/Nita121388.otter)](https://marketplace.visualstudio.com/items?itemName=Nita121388.otter)
 [![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 
+## ⚠️ 开发阶段说明（重要）
+
+本项目当前处于不稳定的开发/回归阶段，以下内容可能随版本调整：
+
+- 功能入口、命令名称、设置项与默认值
+- 快捷指令解析规则（例如关键字集合、组合动作、弹窗交互）
+- AI Provider 的接入方式与参数（尤其是本地 CLI/批量策略）
+
+建议：
+
+- 使用单独的 VS Code Profile/测试环境验证，避免影响日常环境
+- 开启 Git 同步前先确认远端仓库/分支，必要时先备份 `storagePath`
+- 遇到“设置项不全/视图不显示”，优先执行一次 `Developer: Reload Window`（见下方 FAQ）
+
 ## 🚀 3 分钟快速开始
 
 1. 安装扩展：在 VS Code 扩展市场搜索 `Otter`（或用 VSIX：在 VS Code 执行“扩展：从 VSIX 安装...”）。
@@ -32,6 +46,17 @@
 如果你刚升级/安装后发现“设置项不全/今日任务没显示”，先执行一次 `Developer: Reload Window`（见下方 FAQ）。
 
 ## ✨ 核心能力（按场景）
+
+### Vibe Coding（推荐工作流）
+
+如果你习惯“用一个草稿 Markdown 持续记录今天要做的事”，Otter 更适合作为你与 AI 的协作工作流（Vibe Coding）：
+
+1. 在任意 Markdown 草稿中记录：`@time 任务标题 @start`（写入今日日志并开始计时）
+2. 过程中用 `@add/@+ ... to key` 把关键片段追加到 Obsidian 指定文件（或 `@file/@folder` 快速落盘）
+3. 完成后用 `@time 任务标题 @end` 结束并自动追加精确到秒的时长
+4. 收尾用 `@summary @today` 生成今日总结（支持自定义模板，并附带每项任务跨时长）
+
+这一套的目标是：减少“切换上下文”和“整理成本”，把记录、落盘、计时、总结串成一个轻量闭环。
 
 ### Prompt 管理
 
