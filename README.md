@@ -1,167 +1,112 @@
-# Otter
+# Otter Prompt Desk
 
-> VSCode 插件，用于统一管理和组织 AI Prompt，支持本地存储、Git 同步、AI 辅助生成（开发测试中）
+> VS Code 插件：统一管理 Prompt（本地存储 + Git 同步 + AI 辅助），并提供 Obsidian 追加、今日日志计时、Markdown 快捷指令等效率工具。
 
-[![Version](https://img.shields.io/badge/version-0.1.17-blue.svg)](https://marketplace.visualstudio.com/items?itemName=Nita121388.otter)
+[![VS Marketplace Version](https://img.shields.io/visual-studio-marketplace/v/Nita121388.otter)](https://marketplace.visualstudio.com/items?itemName=Nita121388.otter)
+[![VS Marketplace Installs](https://img.shields.io/visual-studio-marketplace/i/Nita121388.otter)](https://marketplace.visualstudio.com/items?itemName=Nita121388.otter)
 [![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 
-## ✨ 功能特性
+## 🚀 3 分钟快速开始
 
-- 📝 **选区创建 Prompt** - 选中文本一键创建 Prompt，支持智能识别 `# prompt:` 标记和标准 Markdown H1 标题
-- 🗂️ **活动栏视图** - 侧边栏浏览、搜索、管理所有 Prompt，扁平化右键菜单设计
-- 📂 **快速访问仓库** - 一键在系统文件管理器中打开 Prompt 存储文件夹
-- 🔗 **一键打开远程仓库** - 从存储目录自动解析 GitHub 远程地址并在浏览器打开
-- 📈 **使用次数统计** - “复制到剪贴板”计为一次使用，可按使用次数排序
-- 🎨 **Emoji 支持** - 为 Prompt 添加 emoji 图标，快速识别
-- 💾 **本地存储** - JSON 格式存储，支持 Markdown 镜像
-- 📝 **Markdown 自动重命名** - 保存时默认按标题自动重命名（可在 frontmatter 用 `rename: false` 关闭单文件重命名）
-- 🕒 **时间命令** - `@time/@时间` 支持引用块命令与行内替换，按 Enter 自动渲染为时间文本
-- 🧩 **Obsidian 写入** - 选中文本右键：新建到 Obsidian / 追加到 Obsidian 文件（需要配置 Vault 路径）
-- 🔄 **Git 同步** - 支持 Git 版本控制和远程备份
-- 🤖 **AI 辅助** - 自动生成标题、emoji、优化内容（需要先配置 `otter.ai.provider`，并按提供商要求配置 Key 或本地 CLI）
-- 🎯 **首次引导** - 友好的配置向导，快速上手
-- ⚙️ **高度可配置** - 灵活的配置选项，满足不同需求
+1. 安装扩展：在 VS Code 扩展市场搜索 `Otter`（或用 VSIX：在 VS Code 执行“扩展：从 VSIX 安装...”）。
+2. 打开配置向导：`Otter: 配置向导`（命令 ID：`otter.startOnboarding`）。
+3. 配置至少 2 项（最小可用）：
 
-## 🚀 快速开始
-
-### 安装
-
-1. 打开 VSCode
-2. 搜索扩展市场中的 "Otter"
-3. 点击安装
-
-### 使用
-
-#### 1. 从选区创建 Prompt
-
-**标准方式**：
-1. 选中文本
-2. 右键选择 "Otter: 从选区创建"
-3. 输入名称、emoji、标签
-4. 保存
-
-**智能识别方式**（推荐）：
-
-在选中文本的第一行添加标记：
-
-```markdown
-# prompt: 🖨️ 代码审查清单
-在审查代码时，请检查以下方面：
-1. 代码质量
-2. 安全性
-3. 性能
-```
-
-或使用标准 Markdown H1 标题：
-
-```markdown
-# 🖨️ 代码审查清单
-在审查代码时，请检查以下方面：
-1. 代码质量
-2. 安全性
-3. 性能
-```
-
-创建时会自动：
-- 提取名称 "代码审查清单"
-- 提取 emoji 🖨️
-- 移除标记行
-
-#### 2. 活动栏管理
-
-- 点击侧边栏 "Otter" 图标
-- 单击 Prompt 复制内容（会计入使用次数）
-- 双击 Prompt 仅打开文件（不复制、不计次数）
-- 鼠标悬停显示快速操作按钮（复制、编辑、优化、删除）
-- 右键查看更多操作
-
-#### 3. 命令面板搜索
-
-- 按 `Ctrl+Shift+P`（Mac: `Cmd+Shift+P`）
-- 输入 "Otter: 搜索 Prompt"
-- 模糊搜索并快速复制
-
-#### 4. 时间命令（按 Enter 自动渲染）
-
-在 Markdown 里输入 `@time/@时间`，回车换行时会自动替换为当前时间（支持大小写与空格容错）。
-
-```markdown
-# @time 我的内容XXXX
-> @time format=HH:mm TODO
-```
-
-#### 5. 选区写入 Obsidian
-
-选中一段文本后右键：
-- “Otter: 创建到 Obsidian（选择文件夹）”
-- “Otter: 添加到 Obsidian 文件（选择文件）”
-
-## 📖 文档
-
-详细文档请参阅：
-- [文档索引](docs/README.md)
-- [用户手册](docs/user-guide.md)
-- [本地 AI 集成指南](docs/local-ai-integration.md)
-- [需求文档](docs/requirements.md)
-- [设计文档](docs/design.md)
-- [路线图与进度](docs/roadmap.md)
-- [测试计划](docs/test-plan.md)
-- [测试用例](docs/test-cases.md)
-
-## ⚙️ 配置
-
-### 存储路径
-
-```json
+```jsonc
 {
-  "otter.storagePath": "~/.otter"
+  // Prompt 存储根目录（prompts.json 与 Markdown 文件都在此目录下）
+  "otter.storagePath": "~/.otter",
+
+  // 若要用 Obsidian 写入/追加：填 Vault 根目录
+  "otter.obsidian.vaultPath": "E:\\\\Obsidian\\\\Vault",
+
+  // 今日日志目录（相对路径会基于 Vault；留空表示 Vault 根目录）
+  "otter.dailyLog.directory": "WorkLog"
 }
 ```
 
-支持的路径格式：
-- `~/.otter` - 用户主目录
-- `${workspaceFolder}/.prompts` - 项目级别
-- `E:/Projects/my-prompts` - 绝对路径
+4. 验证功能是否已加载：
+   - 左侧 Activity Bar 出现 `Otter` 图标，打开后有两个视图：`Prompts` 与 `今日任务`
+   - 在任意 `.md` 输入并回车：`@time 修复 A @start`（应写入今日日志并开始计时）
 
-### 选区智能识别
+如果你刚升级/安装后发现“设置项不全/今日任务没显示”，先执行一次 `Developer: Reload Window`（见下方 FAQ）。
 
-```json
-{
-  "otter.selection.autoDetectPromptName": true,
-  "otter.selection.removePromptMarker": true
-}
-```
+## ✨ 核心能力（按场景）
 
-### 时间命令
+### Prompt 管理
 
-```json
-{
-  "otter.time.format": "YYYY-MM-DD HH:mm",
-  "otter.time.autoRenderOnEnter": true
-}
-```
+- 选区创建 Prompt：支持识别 `# prompt:` 与 Markdown H1 标题
+- 侧边栏管理：浏览/搜索/排序（含使用次数统计）
+- Markdown 镜像：JSON 存储 + Markdown 文件同步；支持按标题自动重命名（可在 frontmatter 关闭）
+- Git 同步：拉取/同步到远端（可配置自动同步）
 
-### 使用次数排序
+### 今日任务（今日日志计时）
 
-```json
-{
-  "otter.ui.sortBy": "usage"
-}
-```
+- 侧边栏 `今日任务`：展示运行中/已完成任务；支持点击结束、点击已完成任务继续
+- 计时精确到秒：结束时在文本中追加 `2h 51m 03s`（不删除原文本）
+- 今日日志：可配置日志目录与文件名模板
 
-### Obsidian
+### Markdown 快捷指令（Enter 触发）
 
-```json
-{
-  "otter.obsidian.vaultPath": "E:\\\\File\\\\NitaFile\\\\Obsidian\\\\Obsidian"
-}
-```
+在任意 Markdown 文件中输入 `@...` 指令并回车，可触发组合动作（关键字大小写不敏感）。常用示例：
 
-### Markdown 快捷指令（@start/@end/@file/@folder/@add/@new）
+| 输入示例 | 结果 |
+|---|---|
+| `@time 自动校准-技术支持 @start` | 写入今日日志并开始计时；若同名任务存在则“续”并开始（可弹窗选择） |
+| `@time 自动校准-技术支持 @end` | 结束任务并在该行追加精确到秒的时长（支持 `End/end/over`，可自定义关键字） |
+| `@add 修复 X to inbox` / `@+ 修复 X to inbox` | 将文本追加到 Obsidian key 对应的文件 |
+| `@file test.md to work` | 在 key 对应的文件夹中新建文件（默认扩展名可配置） |
+| `@folder 技术支持 to work` | 在 key 对应的文件夹中新建文件夹 |
+| `@summary @today` | AI 总结“今日任务文件/当前草稿”，并附带每项任务跨时长（模板可自定义） |
 
-先配置 key 映射（示例）：
+> `to key` 的 `key` 必须是你已配置过的 key；否则 `to` 会按普通文本处理，避免误伤自然语言。
 
-```json
+### Obsidian 写入/追加
+
+- 右键选区：新建到 Obsidian / 追加到 Obsidian 文件
+- 结合快捷指令：`@add/@+`、`@file/@folder`、`@new` 等无需右键也可落盘
+
+### 一键备份 / 一键恢复
+
+- 默认备份目录：`storagePath/.otter-backup-*`（也支持执行时选择其它目录）
+- 一键恢复支持“完全覆盖 / 合并恢复”两种策略（执行时选择）
+
+## 🧭 命令索引（Command Palette）
+
+常用命令（`Ctrl+Shift+P` 搜索 `Otter:`）：
+
+- `otter.searchPrompt`：搜索 Prompt
+- `otter.openStorageFolder`：打开 Prompt 仓库文件夹
+- `otter.startOnboarding`：配置向导
+- `otter.dailyLog.openTodayLog`：打开今日日志
+- `otter.dailyLog.record`：记录到今日日志（并开始/继续）
+- `otter.dailyLog.endPick`：结束任务（选择运行中任务）
+- `otter.backupNow`：一键备份（快照）
+- `otter.restoreFromBackup`：一键恢复（从备份恢复）
+- `otter.closeAllPromptEditors`：关闭所有已打开 Prompt（默认仅关闭已保存）
+
+## ⚙️ 配置索引（Settings）
+
+> 建议在设置中用 `@ext:Nita121388.otter` 过滤查看全部配置项。
+
+### 必配/常用
+
+- `otter.storagePath`：Prompt 存储根目录
+- `otter.obsidian.vaultPath`：Obsidian Vault 根目录（使用写入/追加功能时需要）
+- `otter.dailyLog.directory`：今日日志目录（相对 Vault 或绝对路径，见设置说明）
+- `otter.quickCmd.enableOnEnter`：是否启用 Enter 触发快捷指令
+
+### 快捷指令关键字（可自定义）
+
+- `otter.quickCmd.startKeywords`：`@start` 关键字集合
+- `otter.quickCmd.endKeywords`：`@end/@End/@over` 等关键字集合（英文按单词边界匹配）
+- `otter.quickCmd.addKeywords`：`@add/@+` 等关键字集合
+- `otter.quickCmd.newKeywords`、`otter.quickCmd.fileKeywords`、`otter.quickCmd.folderKeywords`
+- `otter.quickCmd.summaryKeywords`、`otter.quickCmd.todayKeywords`、`otter.quickCmd.filenameKeywords`
+
+### Obsidian QuickAdd key 映射
+
+```jsonc
 {
   "otter.obsidian.quickAdd.folders": {
     "work": "Work",
@@ -175,28 +120,97 @@
 }
 ```
 
-用法示例（在任意 `.md` 输入后按 Enter）：
-- `@time 自动校准-技术支持 @start`：开始/继续并记录到今日日志（会弹窗处理同名任务）
-- `@time 自动校准-技术支持 @end`：结束任务并在当前行追加精确到秒的时长
-- `@file README to proj`：在 `proj` 映射的文件夹中新建 `README.md`（若文件已存在会弹窗必选处理方式）
-- `@folder 技术支持 to work`：在 `work` 映射的文件夹中新建目录
-- `@time 修复X @add to inbox` 或 `@time 修复X @+ to inbox`：将文本追加到 key 对应的文件
-- `@summary @today`：AI 总结“当前草稿文件”并写回当前文件，同时附带今日日志计时任务清单（含每项时长）
-- `@summary @today @filename work`：将总结写入到 `work` key 对应的文件（或写入相对 Vault 的 `work.md`，取决于你的配置）
+### 其他常用设置（可选）
 
-提示：为了避免误伤自然语言，`to` 只有在后面跟的是你已配置过的 key 时才会被识别为目标参数；`@to` 也可用。
+- `otter.selection.autoDetectPromptName` / `otter.selection.removePromptMarker`：选区创建 Prompt 的智能识别行为
+- `otter.time.format` / `otter.time.autoRenderOnEnter`：`@time/@时间` 的时间格式与 Enter 自动渲染
+- `otter.ui.sortBy`：侧边栏排序（如按 `usage`）
+- `otter.statusBar.enable`：状态栏入口开关
+- `otter.git.enableSync` / `otter.git.remoteUrl`：Git 同步开关与远端地址
+- `otter.ai.provider`：AI Provider（远端 Key / 本地 CLI）
+- `otter.summary.template`：`@summary` 自定义总结模板
 
-#### 自定义今日总结模板
+## 🗂️ Prompt 文件格式（frontmatter）
 
-可通过 `otter.summary.template` 自定义总结模板（Markdown，多行）。占位符：
+### tags 支持多行列表（Obsidian 写法）
+
+```yaml
+---
+id: 1767745318604-cm13zos
+type: prompt
+tags:
+  - prompt
+aliases:
+  - 🧰-Go 修改仅用补丁
+---
+```
+
+### 关闭单文件自动重命名
+
+```yaml
+---
+rename: false
+---
+```
+
+## 📖 文档
+
+详细文档请参阅：
+- [文档索引](docs/README.md)
+- [用户手册](docs/user-guide.md)
+- [本地 AI 集成指南](docs/local-ai-integration.md)
+- [需求文档](docs/requirements.md)
+- [设计文档](docs/design.md)
+- [路线图与进度](docs/roadmap.md)
+- [测试计划](docs/test-plan.md)
+- [测试用例](docs/test-cases.md)
+
+## ⚙️ 常用配置示例
+
+### storagePath 写法（支持变量）
+
+- 绝对路径：`D:\\Prompts` / `/Users/me/prompts`
+- 用户目录：`~/.otter`
+- 工作区变量：`${workspaceFolder}/.prompts`
+- 环境变量：`${env:MY_DIR}` / `$MY_DIR` / `%MY_DIR%`（Windows）
+
+### 选区智能识别
+
+```jsonc
+{
+  "otter.selection.autoDetectPromptName": true,
+  "otter.selection.removePromptMarker": true
+}
+```
+
+### 时间命令（@time/@时间）
+
+```jsonc
+{
+  "otter.time.format": "YYYY-MM-DD HH:mm:ss",
+  "otter.time.autoRenderOnEnter": true
+}
+```
+
+### 侧边栏排序（按使用次数）
+
+```jsonc
+{
+  "otter.ui.sortBy": "usage"
+}
+```
+
+### 自定义今日总结模板（@summary）
+
+`otter.summary.template` 支持多行 Markdown，常用占位符：
 - `{date}`：YYYY-MM-DD
 - `{draftFile}`：当前草稿文件名
 - `{timedTasksTable}`：计时任务表（插件生成，含每项时长）
 - `{ai}`：AI 生成内容插入点（建议保留）
 
-### AI 批量（本地 CLI 合并调用）
+### AI 批量参数（可选）
 
-```json
+```jsonc
 {
   "otter.ai.provider": "local-codex",
   "otter.ai.batchDelayMs": 500,
@@ -291,3 +305,20 @@ npm run package
 ## 🙏 致谢
 
 感谢所有贡献者和用户的支持！
+
+## ❓ FAQ（常见问题）
+
+### 1) 安装/升级后“设置项不全”或“今日任务”不显示
+
+这通常是 VS Code 扩展宿主的缓存/视图布局未刷新导致：
+
+1. 执行一次 `Developer: Reload Window`
+2. 在 Activity Bar 空白处右键，确认 `Otter` 没有被隐藏
+3. 命令面板执行 `Otter: 刷新今日任务`（`otter.dailyLog.refreshTasks`）
+4. 若是远程窗口（WSL/SSH/Dev Container），请确认扩展已安装到“远程端”
+
+### 2) VSIX 无法安装/打开了 Visual Studio 的 VSIXInstaller
+
+`Otter` 是 **VS Code 扩展**，不要用 Visual Studio 的 `VSIXInstaller.exe` 安装。请在 VS Code 内使用：
+
+- 扩展视图右上角 `...` → “从 VSIX 安装...”
