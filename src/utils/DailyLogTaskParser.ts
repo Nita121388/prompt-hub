@@ -149,7 +149,7 @@ export function extractCandidateTitleFromEndText(text: string, keywordPatterns: 
     .replace(/^@+\s*/g, ' ')
     .replace(/-+>/g, ' ')
     .replace(/→|=>/g, ' ')
-    .replace(/[()（）\[\]【】]/g, ' ')
+    .replace(/[()（）【】\u005B\u005D]/g, ' ')
     .replace(/[#*_`]/g, ' ')
     .replace(/\s+/g, ' ')
     .trim();

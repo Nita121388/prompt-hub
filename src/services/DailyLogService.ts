@@ -337,10 +337,6 @@ export class DailyLogService {
   }
 }
 
-function ensureTrailingNewline(s: string): string {
-  return s.endsWith('\n') ? s : `${s}\n`;
-}
-
 function ensureLeadingNewlines(text: string, count: number): string {
   const wanted = '\n'.repeat(Math.max(0, count));
   const trimmed = (text || '').replace(/^\n+/, '');

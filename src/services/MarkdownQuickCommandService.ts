@@ -1371,7 +1371,15 @@ function sanitizeRelativePathParts(raw: string): string[] {
 }
 
 function sanitizePathSegment(raw: string): string {
-  let s = (raw || '').replace(/[\x00-\x1F]/g, '').trim();
+  let s = raw || '';
+  if (s) {
+    let out = '';
+    for (const ch of s) {
+      if (ch.charCodeAt(0) >= 0x20) out += ch;
+    }
+    s = out;
+  }
+  s = s.trim();
   if (!s) return '';
 
   // 替换 Windows 不允许的字符，但保留空格（不强制转短横线）
