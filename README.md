@@ -233,6 +233,8 @@ rename: false
 - `{timedTasksTable}`：计时任务表（插件生成，含每项时长）
 - `{ai}`：AI 生成内容插入点（建议保留）
 
+也支持将模板放在独立文件中，通过 `otter.summary.templatePath` 指定（优先级高于 `otter.summary.template`）。
+
 ### AI 批量参数（可选）
 
 ```jsonc

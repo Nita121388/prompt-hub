@@ -11,6 +11,7 @@
 
 - [需求说明](./requirements.md)
 - [开发设计](./design.md)
+- [今日总结（@summary）当前实现说明](./summary-current-implementation.md)
 - [测试计划](./test-plan.md)
 - [测试用例](./test-cases.md)
 - [路线图与进度](./roadmap.md)
