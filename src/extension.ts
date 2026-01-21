@@ -14,6 +14,8 @@ import { DailyLogService } from './services/DailyLogService';
 import { DailyTaskTreeProvider } from './providers/DailyTaskTreeProvider';
 import { DailyLogAutoDetectService } from './services/DailyLogAutoDetectService';
 import { MarkdownQuickCommandService } from './services/MarkdownQuickCommandService';
+import { TrackedFileService } from './services/TrackedFileService';
+import { TrackedFileDecorationProvider } from './providers/TrackedFileDecorationProvider';
 
 /**
  * 插件激活时调用
@@ -108,7 +110,23 @@ export async function activate(context: vscode.ExtensionContext) {
     const timer = setInterval(() => dailyTaskProvider.refresh(), 60_000);
     context.subscriptions.push({ dispose: () => clearInterval(timer) });
 
-    // 监听 storagePath 配置变更，动态切换存储目录并刷新视图
+    // Git 自动同步与启动自动拉取
+    const gitSyncService = new GitSyncService(configService);
+
+    // 跟踪文件服务与标记
+    const trackedFileService = new TrackedFileService(configService, gitSyncService);
+    await trackedFileService.initialize(context);
+    context.subscriptions.push({ dispose: () => trackedFileService.dispose() });
+
+    const trackedDecorationProvider = new TrackedFileDecorationProvider(trackedFileService);
+    context.subscriptions.push(vscode.window.registerFileDecorationProvider(trackedDecorationProvider));
+    context.subscriptions.push(
+      trackedFileService.onDidChange(() => {
+        trackedDecorationProvider.refresh();
+      })
+    );
+
+    // 监听 storagePath/track.baseDir 配置变更，动态切换存储目录并刷新视图
     context.subscriptions.push(
       configService.onDidChange(async (e) => {
         if (
@@ -119,11 +137,27 @@ export async function activate(context: vscode.ExtensionContext) {
             const newPath = configService.getStoragePath();
             await storageService.updateStoragePath(newPath);
             treeProvider.refresh();
+            await trackedFileService.reload();
             vscode.window.showInformationMessage(`Otter 已切换存储路径：${newPath}`);
           } catch (err) {
             logger.error('[Extension] 切换 storagePath 失败', err);
             void vscode.window.showErrorMessage(
               `Otter 切换存储路径失败：${err instanceof Error ? err.message : String(err)}`
+            );
+          }
+        }
+
+        if (
+          e.affectsConfiguration('otter.track.baseDir') ||
+          e.affectsConfiguration('promptHub.track.baseDir')
+        ) {
+          try {
+            await trackedFileService.reload();
+            trackedDecorationProvider.refresh();
+          } catch (err) {
+            logger.error('[Extension] 切换 track.baseDir 失败', err);
+            void vscode.window.showErrorMessage(
+              `Otter 切换 track.baseDir 失败：${err instanceof Error ? err.message : String(err)}`
             );
           }
         }
@@ -138,7 +172,8 @@ export async function activate(context: vscode.ExtensionContext) {
       treeProvider,
       treeView,
       dailyLogService,
-      dailyTaskProvider
+      dailyTaskProvider,
+      trackedFileService
     );
     commandRegistrar.registerAll();
 
@@ -159,9 +194,6 @@ export async function activate(context: vscode.ExtensionContext) {
     // 初始化状态栏
     const statusBarService = new StatusBarService(context, configService);
     void statusBarService;
-
-    // Git 自动同步与启动自动拉取
-    const gitSyncService = new GitSyncService(configService);
 
     // 绑定自动同步（保存存储目录中的 Markdown 文件后，延迟一段时间自动 sync）
     gitSyncService.bindAutoSync(context);

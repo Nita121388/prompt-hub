@@ -482,6 +482,7 @@ export class PromptStorageService {
     const result: string[] = [];
     const ignoreDirs = new Set(['.git', 'node_modules', '.vscode', '.obsidian']);
     const ignoreDirPrefixes = ['.otter-backup-'];
+    const trackedBaseDir = this.getTrackedBaseDir(root);
 
     const walk = async (dir: string) => {
       let entries: Dirent[];
@@ -495,6 +496,7 @@ export class PromptStorageService {
       for (const entry of entries) {
         const fullPath = path.join(dir, entry.name);
         if (entry.isDirectory()) {
+          if (trackedBaseDir && this.isSameOrInside(trackedBaseDir, fullPath)) continue;
           if (ignoreDirs.has(entry.name)) continue;
           if (ignoreDirPrefixes.some((prefix) => entry.name.startsWith(prefix))) continue;
           await walk(fullPath);
@@ -506,6 +508,18 @@ export class PromptStorageService {
 
     await walk(root);
     return result;
+  }
+
+  private getTrackedBaseDir(storagePath: string): string | null {
+    const raw = (this.configService.get<string>('track.baseDir', '.otter-tracked') || '').trim();
+    const fallback = raw || '.otter-tracked';
+    const resolved = this.configService.resolvePath(fallback);
+    return path.isAbsolute(resolved) ? resolved : path.join(storagePath, resolved);
+  }
+
+  private isSameOrInside(root: string, target: string): boolean {
+    const rel = path.relative(path.resolve(root), path.resolve(target));
+    return !rel || (!rel.startsWith('..') && !path.isAbsolute(rel));
   }
 
   /** 生成不与现有 Prompt 冲突的唯一 ID */

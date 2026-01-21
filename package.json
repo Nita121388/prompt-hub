@@ -116,6 +116,21 @@
         "icon": "$(folder-opened)"
       },
       {
+        "command": "otter.trackFile",
+        "title": "📌 跟踪文件",
+        "category": "Otter"
+      },
+      {
+        "command": "otter.untrackFile",
+        "title": "🚫 取消跟踪文件",
+        "category": "Otter"
+      },
+      {
+        "command": "otter.trackGoToNext",
+        "title": "🧭 新建下一份（归档）",
+        "category": "Otter"
+      },
+      {
         "command": "otter.openRemoteRepo",
         "title": "🌐 打开远程仓库主页",
         "category": "Otter",
@@ -273,6 +288,28 @@
           "command": "otter.dailyLog.appendSelectionToTask",
           "when": "editorHasSelection",
           "group": "2_obsidian@4"
+        },
+        {
+          "command": "otter.trackGoToNext",
+          "when": "editorTextFocus",
+          "group": "3_track@1"
+        },
+        {
+          "command": "otter.trackFile",
+          "when": "editorTextFocus",
+          "group": "3_track@2"
+        },
+        {
+          "command": "otter.untrackFile",
+          "when": "editorTextFocus",
+          "group": "3_track@3"
+        }
+      ],
+      "explorer/context": [
+        {
+          "submenu": "otter.editorContext",
+          "when": "resourceScheme == file",
+          "group": "navigation@9"
         }
       ],
       "view/title": [
@@ -490,6 +527,50 @@
           "description": "在任意 Markdown 中输入 @结束/@end/@over 后按 Enter，自动结束任务并在该行补充时长（精确到秒）。",
           "markdownDescription": "在任意 Markdown 中输入 `@结束` / `@end` / `@over` 后按 Enter，自动结束任务并在当前行末尾补充时长（精确到秒）。\n\n- 结束关键字由 `otter.dailyLog.endKeywords` 控制\n- 并行任务：若无法唯一匹配，会弹出列表让你选择要结束的任务\n- 若匹配不到运行中任务：会询问是否将该行作为普通文本追加到今日日志",
           "order": 0.64
+        },
+        "otter.track.baseDir": {
+          "type": "string",
+          "default": ".otter-tracked",
+          "description": "跟踪文件归档目录（相对 storagePath 的子目录）。",
+          "markdownDescription": "跟踪文件归档目录（相对 `otter.storagePath`）。\n\n示例：`.otter-tracked` / `archives/tracked`",
+          "order": 0.645
+        },
+        "otter.track.filenameTemplate": {
+          "type": "string",
+          "default": "{date}-{index}{ext}",
+          "description": "“下一份”文件名模板。",
+          "markdownDescription": "“下一份”文件名模板。\n\n占位符：`{date}`、`{index}`、`{basename}`、`{ext}`\n\n默认：`{date}-{index}{ext}` → `2026-01-14-01.md`",
+          "order": 0.646
+        },
+        "otter.track.dateFormat": {
+          "type": "string",
+          "default": "YYYY-MM-DD",
+          "description": "“下一份”日期格式。",
+          "markdownDescription": "“下一份”日期格式。\n\n示例：`YYYY-MM-DD`、`YYYYMMDD`",
+          "order": 0.647
+        },
+        "otter.track.indexPadding": {
+          "type": "number",
+          "default": 2,
+          "minimum": 1,
+          "description": "“下一份”版本号补零长度。",
+          "markdownDescription": "“下一份”版本号补零长度。\n\n例如 2 → `01`，3 → `001`。",
+          "order": 0.648
+        },
+        "otter.track.autoSyncOnSave": {
+          "type": "boolean",
+          "default": true,
+          "description": "保存跟踪文件后自动同步到 Git。",
+          "markdownDescription": "保存跟踪文件后自动同步到 Git。",
+          "order": 0.649
+        },
+        "otter.track.autoSyncDelaySeconds": {
+          "type": "number",
+          "default": 30,
+          "minimum": 5,
+          "description": "跟踪文件自动同步延迟（秒）。",
+          "markdownDescription": "跟踪文件自动同步延迟（秒）。\n\n多次保存会合并为一次同步。",
+          "order": 0.65
         },
         "otter.quickCmd.fileKeywords": {
           "type": "array",

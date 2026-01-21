@@ -11,6 +11,8 @@
 
 - [需求说明](./requirements.md)
 - [开发设计](./design.md)
+- [跟踪文件需求说明](./tracked-files-requirements.md)
+- [跟踪文件设计方案](./tracked-files-design.md)
 - [今日总结（@summary）当前实现说明](./summary-current-implementation.md)
 - [测试计划](./test-plan.md)
 - [测试用例](./test-cases.md)
@@ -24,4 +26,3 @@
 ## 相关（仓库根目录）
 
 - `CLAUDE.md`：AI 辅助开发约定/提示词（给开发者/Agent 使用）
-

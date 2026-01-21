@@ -93,6 +93,12 @@ export class MarkdownMirrorService {
       return;
     }
 
+    const trackedBaseDir = this.getTrackedBaseDir(storagePath);
+    if (trackedBaseDir && this.isInside(trackedBaseDir, doc.uri.fsPath)) {
+      console.log('[MarkdownMirrorService] 文件位于跟踪归档目录内，跳过处理');
+      return;
+    }
+
     const text = doc.getText();
     console.log('[MarkdownMirrorService] 文件内容长度:', text.length, '字符');
 
@@ -344,6 +350,13 @@ export class MarkdownMirrorService {
   private isInside(root: string, target: string): boolean {
     const rel = path.relative(path.resolve(root), path.resolve(target));
     return !!rel && !rel.startsWith('..') && !path.isAbsolute(rel);
+  }
+
+  private getTrackedBaseDir(storagePath: string): string | null {
+    const raw = (this.config.get<string>('track.baseDir', '.otter-tracked') || '').trim();
+    const fallback = raw || '.otter-tracked';
+    const resolved = this.config.resolvePath(fallback);
+    return path.isAbsolute(resolved) ? resolved : path.join(storagePath, resolved);
   }
 
   private normalizePathForCompare(p: string): string {

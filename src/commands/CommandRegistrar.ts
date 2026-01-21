@@ -18,6 +18,7 @@ import { enqueueByKey } from '../utils/WriteQueue';
 import { formatDateTime, renderTimeCommandLine } from '../utils/TimeCommand';
 import { DailyLogService } from '../services/DailyLogService';
 import { DailyTaskTreeProvider } from '../providers/DailyTaskTreeProvider';
+import { TrackedFileService } from '../services/TrackedFileService';
 
 /**
  * 命令注册器：负责注册所有 Otter 相关命令并实现具体逻辑
@@ -44,6 +45,26 @@ export class CommandRegistrar {
     return undefined;
   }
 
+  private requireTrackedService(): TrackedFileService | null {
+    if (this.trackedFileService) return this.trackedFileService;
+    void vscode.window.showErrorMessage('跟踪服务未初始化，请重启 VS Code 后重试。');
+    return null;
+  }
+
+  private resolveTargetFilePath(context?: unknown): string | null {
+    if (context instanceof vscode.Uri) {
+      return context.fsPath;
+    }
+    if (Array.isArray(context) && context[0] instanceof vscode.Uri) {
+      return context[0].fsPath;
+    }
+    const editor = vscode.window.activeTextEditor;
+    if (editor?.document?.uri?.fsPath) {
+      return editor.document.uri.fsPath;
+    }
+    return null;
+  }
+
   constructor(
     private readonly context: vscode.ExtensionContext,
     private readonly storageService: PromptStorageService,
@@ -51,7 +72,8 @@ export class CommandRegistrar {
     private readonly treeProvider: PromptTreeProvider,
     private readonly treeView?: vscode.TreeView<vscode.TreeItem>,
     private readonly dailyLogService?: DailyLogService,
-    private readonly dailyTaskProvider?: DailyTaskTreeProvider
+    private readonly dailyTaskProvider?: DailyTaskTreeProvider,
+    private readonly trackedFileService?: TrackedFileService
   ) {}
 
   /** 注册所有命令 */
@@ -81,6 +103,9 @@ export class CommandRegistrar {
     this.register('otter.backupNow', () => this.backupNow());
     this.register('otter.restoreFromBackup', () => this.restoreFromBackup());
     this.register('otter.closeAllPromptEditors', () => this.closeAllPromptEditors());
+    this.register('otter.trackFile', (context?: unknown) => this.trackFile(context));
+    this.register('otter.untrackFile', (context?: unknown) => this.untrackFile(context));
+    this.register('otter.trackGoToNext', (context?: unknown) => this.trackGoToNext(context));
 
     // 今日日志任务计时
     this.register('otter.dailyLog.record', () => this.dailyLogRecord());
@@ -639,6 +664,90 @@ export class CommandRegistrar {
     const storagePath = this.configService.getStoragePath();
     const uri = vscode.Uri.file(storagePath);
     await vscode.env.openExternal(uri);
+  }
+
+  /** 开始跟踪文件 */
+  private async trackFile(context?: unknown): Promise<void> {
+    const service = this.requireTrackedService();
+    if (!service) return;
+
+    let target = this.resolveTargetFilePath(context);
+    if (!target) {
+      const picked = await vscode.window.showOpenDialog({
+        canSelectMany: false,
+        canSelectFiles: true,
+        canSelectFolders: false,
+        openLabel: '选择文件',
+      });
+      if (!picked || !picked.length) return;
+      target = picked[0].fsPath;
+    }
+
+    try {
+      await service.trackFile(target);
+      void vscode.window.showInformationMessage(`已开始跟踪：${path.basename(target)}`);
+    } catch (err) {
+      void vscode.window.showErrorMessage(
+        `开始跟踪失败：${err instanceof Error ? err.message : String(err)}`
+      );
+    }
+  }
+
+  /** 取消跟踪文件 */
+  private async untrackFile(context?: unknown): Promise<void> {
+    const service = this.requireTrackedService();
+    if (!service) return;
+
+    let target = this.resolveTargetFilePath(context);
+    if (!target) {
+      const entries = service.list();
+      if (!entries.length) {
+        void vscode.window.showInformationMessage('暂无跟踪文件。');
+        return;
+      }
+      const pick = await vscode.window.showQuickPick(
+        entries.map((entry) => ({
+          label: entry.label || path.basename(entry.sourcePath),
+          description: entry.sourcePath,
+          value: entry.sourcePath,
+        })),
+        { placeHolder: '选择要取消跟踪的文件' }
+      );
+      if (!pick) return;
+      target = pick.value;
+    }
+
+    try {
+      await service.untrackFile(target);
+      void vscode.window.showInformationMessage(`已取消跟踪：${path.basename(target)}`);
+    } catch (err) {
+      void vscode.window.showErrorMessage(
+        `取消跟踪失败：${err instanceof Error ? err.message : String(err)}`
+      );
+    }
+  }
+
+  /** 新建下一份并继续跟踪 */
+  private async trackGoToNext(context?: unknown): Promise<void> {
+    const service = this.requireTrackedService();
+    if (!service) return;
+
+    const target = this.resolveTargetFilePath(context);
+    if (!target) {
+      void vscode.window.showWarningMessage('请在编辑器中打开一个文件，或从资源管理器右键触发。');
+      return;
+    }
+
+    try {
+      const nextPath = await service.goToNextFile(target);
+      const doc = await vscode.workspace.openTextDocument(nextPath);
+      await vscode.window.showTextDocument(doc, { preview: false });
+      void vscode.window.showInformationMessage(`已生成下一份：${path.basename(nextPath)}`);
+    } catch (err) {
+      void vscode.window.showErrorMessage(
+        `生成下一份失败：${err instanceof Error ? err.message : String(err)}`
+      );
+    }
   }
 
   /** 启动配置向导 */
