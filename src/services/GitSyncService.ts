@@ -318,14 +318,29 @@ export class GitSyncService {
     ].join('');
   }
 
+  private getUntrackedOverwriteMatchers(): RegExp[] {
+    return [
+      /untracked working tree files would be overwritten/i,
+      /would be overwritten by checkout/i,
+      /would be overwritten by merge/i,
+      /工作区.*未跟踪.*文件.*(检出|合并).*覆盖/,
+      /未跟踪.*文件.*(检出|合并).*覆盖/,
+      /未跟踪.*文件.*覆盖/,
+    ];
+  }
+
+  private isUntrackedOverwriteMessage(message: string): boolean {
+    const text = (message || '').toString();
+    if (!text) return false;
+    return this.getUntrackedOverwriteMatchers().some((re) => re.test(text));
+  }
+
   private extractConflictingPathsFromGitMessage(message: string): string[] {
     const lines = (message || '').split(/\r?\n/);
     if (!lines.length) return [];
 
     const startIndex = lines.findIndex((l) =>
-      /untracked working tree files would be overwritten/i.test(l) ||
-      /would be overwritten by checkout/i.test(l) ||
-      /would be overwritten by merge/i.test(l)
+      this.getUntrackedOverwriteMatchers().some((re) => re.test(l))
     );
     if (startIndex < 0) return [];
 
@@ -339,7 +354,10 @@ export class GitSyncService {
         /Please move or remove them/i.test(trimmed) ||
         /Aborting/i.test(trimmed) ||
         /^error:/i.test(trimmed) ||
-        /^fatal:/i.test(trimmed)
+        /^fatal:/i.test(trimmed) ||
+        /请.*移动.*删除/.test(trimmed) ||
+        /正在终止/.test(trimmed) ||
+        /已终止/.test(trimmed)
       ) {
         break;
       }
@@ -375,9 +393,23 @@ export class GitSyncService {
    */
   async importFromRemote(remoteUrl?: string): Promise<void> {
     this.lastImportBackupDir = null;
+    const sanitizedInput = remoteUrl ? this.sanitizeRemoteUrl(remoteUrl) : '';
+    logger.info('[GitSyncService] importFromRemote start', {
+      root: this.root,
+      remote: sanitizedInput || '(from config)',
+    });
     await this.logRepoDiagnostics('importFromRemote:before');
     await this.ensureRepo();
     await this.ensureOriginRemote(remoteUrl);
+
+    try {
+      const origin = await this.getOriginRemoteUrl();
+      logger.info('[GitSyncService] importFromRemote origin', {
+        origin: origin ? this.sanitizeRemoteUrl(origin) : '(none)',
+      });
+    } catch {
+      logger.warn('[GitSyncService] importFromRemote read origin failed');
+    }
 
     // 获取远端引用
     await this.runGit(['fetch', '--prune', 'origin'], this.root);
@@ -387,8 +419,10 @@ export class GitSyncService {
 
     const branch = await this.detectRemoteDefaultBranch();
     if (!branch) {
+      logger.error('[GitSyncService] importFromRemote failed: default branch not found');
       throw new Error('无法确定远端默认分支：请确认远端仓库存在 main/master 分支，且不是空仓库。');
     }
+    logger.info('[GitSyncService] importFromRemote branch', { branch });
     this.logDebug(`[GitSyncService] importFromRemote() 远端默认分支=${branch}`);
 
     // 仅用于诊断：列出远端文件快照，帮助判断“某文件是否来自远端”
@@ -414,10 +448,7 @@ export class GitSyncService {
       await this.runGit(['checkout', '-B', branch, `origin/${branch}`], this.root);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
-      const isUntrackedOverwrite =
-        /would be overwritten by checkout/i.test(message) ||
-        /untracked working tree files would be overwritten/i.test(message) ||
-        /Please move or remove them/i.test(message);
+      const isUntrackedOverwrite = this.isUntrackedOverwriteMessage(message);
 
       if (!isUntrackedOverwrite) {
         throw error;
@@ -433,6 +464,9 @@ export class GitSyncService {
           .slice(0, 20)
           .join(', ')}`
       );
+      logger.warn('[GitSyncService] importFromRemote untracked overwrite', {
+        count: conflictRelPaths.length,
+      });
 
       if (!conflictRelPaths.length) {
         // 理论上 Git 会列出冲突路径；若解析失败，给出更明确的提示
@@ -443,6 +477,7 @@ export class GitSyncService {
 
       await fs.mkdir(backupDir, { recursive: true });
       this.lastImportBackupDir = backupDir;
+      logger.info('[GitSyncService] importFromRemote backup created', { backupDir });
 
       const moved: string[] = [];
       for (const rel of conflictRelPaths) {
@@ -492,10 +527,19 @@ export class GitSyncService {
         this.logDebug(
           `[GitSyncService] importFromRemote() 已恢复本地文件 restored=${restored} conflicts=${conflicts} checkoutSucceeded=${checkoutSucceeded}`
         );
+        logger.info('[GitSyncService] importFromRemote restore', {
+          restored,
+          conflicts,
+          checkoutSucceeded,
+        });
       }
     }
 
     await this.logRepoDiagnostics('importFromRemote:after');
+    logger.info('[GitSyncService] importFromRemote completed', {
+      root: this.root,
+      backupDir: this.lastImportBackupDir || undefined,
+    });
   }
 
   async pullRebase(remoteUrl?: string): Promise<void> {

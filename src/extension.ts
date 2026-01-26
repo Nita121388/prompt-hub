@@ -73,16 +73,15 @@ export async function activate(context: vscode.ExtensionContext) {
 
         const message =
           '今日任务/今日日志尚未配置：请配置 Obsidian Vault（otter.obsidian.vaultPath），或将今日日志目录（otter.dailyLog.directory）设置为绝对路径。';
-        const action = await vscode.window.showWarningMessage(
-          message,
-          '打开配置向导',
-          '打开设置'
-        );
-        if (action === '打开配置向导') {
-          await vscode.commands.executeCommand('otter.startOnboarding');
-        } else if (action === '打开设置') {
-          await vscode.commands.executeCommand('workbench.action.openSettings', 'otter.dailyLog');
-        }
+        void vscode.window
+          .showWarningMessage(message, '打开配置向导', '打开设置')
+          .then((action) => {
+            if (action === '打开配置向导') {
+              void vscode.commands.executeCommand('otter.startOnboarding');
+            } else if (action === '打开设置') {
+              void vscode.commands.executeCommand('workbench.action.openSettings', 'otter.dailyLog');
+            }
+          });
       }
     }
 

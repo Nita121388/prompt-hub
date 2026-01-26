@@ -6,6 +6,7 @@ import * as cp from 'child_process';
 import { OnboardingState } from '../types/Prompt';
 import { ConfigurationService } from './ConfigurationService';
 import { GitSyncService } from './GitSyncService';
+import { logger } from './Logger';
 
 const LOG_PREFIX = '[OnboardingWizard]';
 
@@ -53,13 +54,22 @@ export class OnboardingWizard {
     };
 
     console.log(LOG_PREFIX, '构造函数初始化，state =', this.state);
+    logger.debug(`${LOG_PREFIX} init`, {
+      step: this.state.step,
+      storagePath: this.state.storagePath,
+      obsidianVaultPath: this.state.obsidianVaultPath,
+      gitEnabled: this.state.gitEnabled,
+      aiProvider: this.state.aiProvider,
+    });
   }
 
   /** 对外启动入口 */
   async start(): Promise<void> {
     console.log(LOG_PREFIX, 'start() 调用');
+    logger.info(`${LOG_PREFIX} start`, { step: this.state.step, storagePath: this.state.storagePath });
     const result = await this.showWelcomeV2();
     console.log(LOG_PREFIX, 'showWelcome 返回结果:', result);
+    logger.info(`${LOG_PREFIX} welcome`, { result });
 
     if (result === 'start') {
       await this.runFlow();
@@ -167,6 +177,7 @@ export class OnboardingWizard {
    */
   private async runFlow(): Promise<void> {
     console.log(LOG_PREFIX, 'runFlow() 开始，当前 state =', this.state);
+    logger.info(`${LOG_PREFIX} runFlow start`, { step: this.state.step });
 
     try {
       let currentStep: 2 | 3 | 4 | 5 | 6 = 2;
@@ -175,6 +186,7 @@ export class OnboardingWizard {
       // 当前存储路径（如果之前配置过就复用）
       let storagePath = this.state.storagePath || '~/.otter';
       console.log(LOG_PREFIX, 'runFlow() 初始存储路径:', storagePath);
+      logger.debug(`${LOG_PREFIX} runFlow storagePath`, { storagePath });
 
       while (!finished) {
         console.log(LOG_PREFIX, 'runFlow() 进入步骤:', currentStep);
@@ -186,6 +198,7 @@ export class OnboardingWizard {
 
           if (result.type === 'cancel') {
             vscode.window.showWarningMessage('配置向导已取消，之前的配置保持不变。');
+            logger.warn(`${LOG_PREFIX} configureStorage cancelled`);
             return;
           }
 
@@ -195,6 +208,7 @@ export class OnboardingWizard {
           await this.saveState();
 
           console.log(LOG_PREFIX, '步骤 2 完成，storagePath =', storagePath);
+          logger.info(`${LOG_PREFIX} configureStorage done`, { storagePath });
           currentStep = 3;
         } else if (currentStep === 3) {
           // 步骤 3：Obsidian Vault（可选）
@@ -208,6 +222,7 @@ export class OnboardingWizard {
 
           if (vaultResult.type === 'cancel') {
             vscode.window.showWarningMessage('配置向导已取消，之前的配置保持不变。');
+            logger.warn(`${LOG_PREFIX} configureObsidianVault cancelled`);
             return;
           }
 
@@ -222,6 +237,9 @@ export class OnboardingWizard {
           await this.saveState();
 
           console.log(LOG_PREFIX, '步骤 3 完成，obsidianVaultPath =', this.state.obsidianVaultPath);
+          logger.info(`${LOG_PREFIX} configureObsidianVault done`, {
+            obsidianVaultPath: this.state.obsidianVaultPath,
+          });
           currentStep = 4;
         } else if (currentStep === 4) {
           // 步骤 4：Git 同步
@@ -268,6 +286,12 @@ export class OnboardingWizard {
             'gitRemoteUrl =',
             this.state.gitRemoteUrl
           );
+          logger.info(`${LOG_PREFIX} configureGit done`, {
+            gitEnabled: this.state.gitEnabled,
+            gitRemoteUrl: this.state.gitRemoteUrl
+              ? this.sanitizeRemoteUrlForLog(this.state.gitRemoteUrl)
+              : undefined,
+          });
           currentStep = 5;
         } else if (currentStep === 5) {
           // 步骤 5：AI Provider
@@ -291,6 +315,7 @@ export class OnboardingWizard {
           await this.saveState();
 
           console.log(LOG_PREFIX, '步骤 5 完成，aiProvider =', this.state.aiProvider);
+          logger.info(`${LOG_PREFIX} configureAI done`, { aiProvider: this.state.aiProvider });
 
           // 如果选择了 local-claude，且是 Windows，检查 Git Bash
           if (aiResult.type === 'next' && aiResult.provider === 'local-claude' && process.platform === 'win32') {
@@ -317,9 +342,11 @@ export class OnboardingWizard {
 
       // 步骤 6：完成页（已自动保存，只显示摘要）
       console.log(LOG_PREFIX, '所有配置步骤完成，进入完成页');
+      logger.info(`${LOG_PREFIX} runFlow completed`);
       await this.showCompletion();
     } catch (error) {
       console.error(LOG_PREFIX, '配置向导执行出错:', error);
+      logger.error(`${LOG_PREFIX} runFlow error`, error);
       vscode.window.showErrorMessage(
         `配置向导出错: ${error instanceof Error ? error.message : String(error)}`
       );
@@ -339,6 +366,7 @@ export class OnboardingWizard {
       '解析 =',
       resolvedPrevious
     );
+    logger.info(`${LOG_PREFIX} configureStorage`, { previousPath, resolvedPrevious });
 
     type ScenarioItem = vscode.QuickPickItem & { path: string };
 
@@ -398,6 +426,7 @@ export class OnboardingWizard {
     if (!selected) {
       return { type: 'cancel' };
     }
+    logger.info(`${LOG_PREFIX} configureStorage picked`, { path: selected.path, label: selected.label });
 
     // 保持当前路径：不修改设置，只保证目录存在
     if (selected.path === 'keep') {
@@ -405,6 +434,7 @@ export class OnboardingWizard {
       if (!fs.existsSync(resolved)) {
         fs.mkdirSync(resolved, { recursive: true });
         vscode.window.showInformationMessage(`已创建存储目录：${resolved}`);
+        logger.info(`${LOG_PREFIX} storage dir created`, { resolved });
       }
       return { type: 'next', storagePath: previousPath || '~/.otter' };
     }
@@ -469,11 +499,13 @@ export class OnboardingWizard {
       storagePath,
       vscode.ConfigurationTarget.Global
     );
+    logger.info(`${LOG_PREFIX} storagePath updated`, { storagePath, resolvedPath });
 
     // 创建目录
     if (!fs.existsSync(resolvedPath)) {
       fs.mkdirSync(resolvedPath, { recursive: true });
       vscode.window.showInformationMessage(`已创建存储目录：${resolvedPath}`);
+      logger.info(`${LOG_PREFIX} storage dir created`, { resolvedPath });
     }
 
     return { type: 'next', storagePath };
@@ -864,13 +896,15 @@ export class OnboardingWizard {
       '解析 =',
       resolvedPath
     );
+    logger.info(`${LOG_PREFIX} configureGit start`, { storagePath, resolvedPath });
 
     const isGitRepo = await this.checkGitRepo(resolvedPath);
     console.log(LOG_PREFIX, 'configureGit() 当前目录是否 Git 仓库:', isGitRepo);
+    logger.info(`${LOG_PREFIX} configureGit repoCheck`, { resolvedPath, isGitRepo });
 
     let message: string;
     interface GitOption extends vscode.QuickPickItem {
-      value: 'enable' | 'init' | 'skip' | 'back';
+      value: 'enable' | 'init' | 'import' | 'skip' | 'back';
     }
     interface RemoteActionItem extends vscode.QuickPickItem {
       value: 'keep' | 'edit' | 'local-only';
@@ -898,13 +932,19 @@ export class OnboardingWizard {
         },
       ];
     } else {
-      message = '当前存储目录还不是 Git 仓库。\n\n是否初始化 Git 仓库并启用版本管理？';
+      message =
+        '当前存储目录还不是 Git 仓库。\n\n你可以选择初始化本地仓库，或从远程导入已有仓库。';
       options = [
+        {
+          label: '$(cloud-download) 从远程导入已有仓库（推荐）',
+          description: '已有远端内容：先导入再启用同步',
+          value: 'import',
+          picked: true,
+        },
         {
           label: '$(repo) 初始化并启用同步',
           description: '在该目录执行 git init',
           value: 'init',
-          picked: true,
         },
         {
           label: '$(clock) 暂不配置',
@@ -925,6 +965,7 @@ export class OnboardingWizard {
     });
 
     console.log(LOG_PREFIX, 'configureGit() QuickPick 选择结果:', selected);
+    logger.info(`${LOG_PREFIX} configureGit picked`, { value: selected?.value });
 
     if (!selected) {
       return { type: 'skip' };
@@ -942,9 +983,15 @@ export class OnboardingWizard {
     if (selected.value === 'init') {
       const ok = await this.initGitRepo(resolvedPath);
       console.log(LOG_PREFIX, 'configureGit() initGitRepo 结果:', ok);
+      logger.info(`${LOG_PREFIX} configureGit init`, { ok, resolvedPath });
       if (!ok) {
         return { type: 'skip' };
       }
+    }
+
+    const preferImport = selected.value === 'import';
+    if (preferImport) {
+      logger.info(`${LOG_PREFIX} configureGit prefer import`, { resolvedPath });
     }
 
     let existingOriginBeforeEdit: string | undefined;
@@ -993,14 +1040,24 @@ export class OnboardingWizard {
       }
     }
 
+    const remotePrompt = preferImport
+      ? [
+          '请输入远程仓库 URL，用于导入已有仓库内容。',
+          '',
+          '提示：导入会把远端内容拉到本地，不会修改远端。',
+        ].join('\n')
+      : [
+          '可选：配置或修改远程仓库 URL，用于将此存储目录推送到 Git 托管平台（例如 GitHub、Gitee 等）。',
+          '',
+          '提示：如果远程仓库已存在内容，我们会优先推荐“导入/拉取”，避免误操作覆盖。',
+          '如果当前仓库已经配置好了远程，或你暂时只想使用本地 Git，可以留空直接回车，我们不会修改现有远程配置。',
+        ].join('\n');
+
     let remoteUrl = await vscode.window.showInputBox({
-      prompt: [
-        '可选：配置或修改远程仓库 URL，用于将此存储目录推送到 Git 托管平台（例如 GitHub、Gitee 等）。',
-        '',
-        '提示：如果远程仓库已存在内容，我们会优先推荐“导入/拉取”，避免误操作覆盖。',
-        '如果当前仓库已经配置好了远程，或你暂时只想使用本地 Git，可以留空直接回车，我们不会修改现有远程配置。',
-      ].join('\n'),
-      placeHolder: '例如：https://github.com/your-name/your-repo.git（留空表示不更改/不配置远程）',
+      prompt: remotePrompt,
+      placeHolder: preferImport
+        ? '例如：https://github.com/your-name/your-repo.git'
+        : '例如：https://github.com/your-name/your-repo.git（留空表示不更改/不配置远程）',
       ignoreFocusOut: true,
       value: existingOriginBeforeEdit || undefined,
     });
@@ -1010,18 +1067,35 @@ export class OnboardingWizard {
       'configureGit() 用户输入远程 URL:',
       remoteUrl ? this.sanitizeRemoteUrlForLog(remoteUrl) : remoteUrl
     );
+    logger.info(`${LOG_PREFIX} configureGit remoteUrl`, {
+      remoteUrl: remoteUrl ? this.sanitizeRemoteUrlForLog(remoteUrl) : undefined,
+      preferImport,
+    });
 
     // 若填写了远程 URL：先探测远程是否非空，再给出安全动作建议
+    if (preferImport && (!remoteUrl || !remoteUrl.trim())) {
+      vscode.window.showWarningMessage('导入远程仓库需要填写 URL，已跳过 Git 配置。');
+      logger.warn(`${LOG_PREFIX} configureGit import skipped: empty remoteUrl`);
+      return { type: 'skip' };
+    }
+
     while (remoteUrl && remoteUrl.trim()) {
       const url = remoteUrl.trim();
+      const sanitized = this.sanitizeRemoteUrlForLog(url);
       const local = await this.getLocalRepoSummary(resolvedPath);
       const probe = await this.probeRemoteRepoState(url, resolvedPath);
+      logger.info(`${LOG_PREFIX} configureGit probe`, {
+        remoteUrl: sanitized,
+        state: probe.state,
+        hasMeaningfulHistory: local.hasMeaningfulHistory,
+        isGitRepo: local.isGitRepo,
+        isEffectivelyEmptyDir: local.isEffectivelyEmptyDir,
+      });
 
       interface RemoteDecisionItem extends vscode.QuickPickItem {
         value: 'import' | 'init-push' | 'save-only' | 'update-origin-only' | 'retry' | 'edit-url';
       }
 
-      const sanitized = this.sanitizeRemoteUrlForLog(url);
       const originBeforeEdit = existingOriginBeforeEdit?.trim();
       const hasOriginToUpdate = Boolean(originBeforeEdit) && originBeforeEdit !== url;
 
@@ -1108,6 +1182,7 @@ export class OnboardingWizard {
       });
 
       console.log(LOG_PREFIX, 'configureGit() 远程动作选择:', decision?.value);
+      logger.info(`${LOG_PREFIX} configureGit decision`, { decision: decision?.value });
 
       if (!decision) {
         break;
@@ -1180,12 +1255,19 @@ export class OnboardingWizard {
 
         try {
           const git = new GitSyncService(this.configService);
+          logger.info(`${LOG_PREFIX} import remote start`, { remoteUrl: sanitized, storagePath: resolvedPath });
           await git.setOriginRemoteUrl(url);
           await git.importFromRemote(url);
           await this.refreshPromptViewAfterGit();
+          const backupDir = git.getLastImportBackupDir();
+          if (backupDir) {
+            logger.warn(`${LOG_PREFIX} import remote backup`, { backupDir });
+          }
+          logger.info(`${LOG_PREFIX} import remote done`, { storagePath: resolvedPath });
           vscode.window.showInformationMessage('已从远程导入完成，本地仓库已就绪。');
         } catch (error) {
           console.error(LOG_PREFIX, 'configureGit() 远程导入出错:', error);
+          logger.error(`${LOG_PREFIX} import remote failed`, error);
           vscode.window.showErrorMessage(
             `从远程导入失败：${error instanceof Error ? error.message : String(error)}`
           );
@@ -1757,13 +1839,16 @@ export class OnboardingWizard {
 
   private async refreshPromptViewAfterGit(): Promise<void> {
     try {
+      logger.info(`${LOG_PREFIX} refreshTreeView`, { storagePath: this.configService.getStoragePath() });
       await vscode.commands.executeCommand('otter.refreshView');
+      logger.info(`${LOG_PREFIX} refreshTreeView done`);
     } catch (error) {
       console.warn(
         LOG_PREFIX,
         'refreshPromptViewAfterGit() 调用 otter.refreshView 失败（可忽略）:',
         error
       );
+      logger.warn(`${LOG_PREFIX} refreshTreeView failed`, error);
     }
   }
 
