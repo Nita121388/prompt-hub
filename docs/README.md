@@ -11,6 +11,7 @@
 
 - [需求说明](./requirements.md)
 - [开发设计](./design.md)
+- [多来源文件夹双向同步设计](./multi-source-sync-design.md)
 - [跟踪文件需求说明](./tracked-files-requirements.md)
 - [跟踪文件设计方案](./tracked-files-design.md)
 - [今日总结（@summary）当前实现说明](./summary-current-implementation.md)
